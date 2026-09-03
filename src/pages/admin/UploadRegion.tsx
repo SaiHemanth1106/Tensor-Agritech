@@ -34,9 +34,6 @@ export default function UploadRegion() {
 
   const [file, setFile] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
-  const [cropDataFile, setCropDataFile] = useState<string | null>(null);
-  const [cropDataFileName, setCropDataFileName] = useState("");
-
   const [geometry, setGeometry] = useState<any[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -137,33 +134,12 @@ export default function UploadRegion() {
       setGeometry(extractGeometry(textReader.result as string));
   };
 
-  const handleCropDataFile = (e: any) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
-
-    if (!/\.(xlsx|xls)$/i.test(selectedFile.name)) {
-      setCropDataFile(null);
-      setCropDataFileName("");
-      setAlert({ type: "error", text: "Upload a valid Excel file (.xlsx or .xls)" });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.readAsDataURL(selectedFile);
-    reader.onload = () => {
-      setCropDataFile((reader.result as string).split(",")[1]);
-      setCropDataFileName(selectedFile.name);
-    };
-    reader.onerror = () =>
-      setAlert({ type: "error", text: "Could not read the crop data Excel file" });
-  };
-
   // ================= SUBMIT =================
   const handleSubmit = async () => {
 
     if (!isAdmin) return;
 
-    if (!form.organization_id || !form.region_id || !file || !cropDataFile) {
+    if (!form.organization_id || !form.region_id || !file) {
       setAlert({ type: "error", text: "Fill required fields" });
       return;
     }
@@ -191,11 +167,6 @@ export default function UploadRegion() {
         name: selectedRegion?.name,
         file,
         file_name: fileName,
-        crop_data_file: cropDataFile,
-        crop_data_file_name: cropDataFileName,
-        crop_data_content_type: cropDataFileName.toLowerCase().endsWith(".xls")
-          ? "application/vnd.ms-excel"
-          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 
         monitoring: {
           enabled: form.monitoring_enabled,
@@ -272,19 +243,6 @@ export default function UploadRegion() {
                 <input hidden type="file" onChange={handleFile} />
               </Button>
               {fileName && <Typography>{fileName}</Typography>}
-            </Grid>
-
-            <Grid item xs={12}>
-              <Button component="label" fullWidth disabled={!isRegionSelected}>
-                Upload Crop Data Excel
-                <input
-                  hidden
-                  type="file"
-                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                  onChange={handleCropDataFile}
-                />
-              </Button>
-              {cropDataFileName && <Typography>{cropDataFileName}</Typography>}
             </Grid>
 
             {/* Map Preview */}

@@ -23,6 +23,7 @@ import DeactivateUser from "./pages/admin/DeactivateUser";
 import DisableMonitoring from "./pages/admin/DisableMonitoring";
 import CreateRegion from "./pages/admin/CreateRegion";
 import RegionManagement from "./pages/admin/RegionManagement";
+import UploadCropDetails from "./pages/admin/UploadCropDetails";
 
 export default function App() {
 
@@ -81,6 +82,7 @@ export default function App() {
 
         {page === "region-create" && <CreateRegion />}
         {page === "region-management" && <RegionManagement />}
+        {page === "region-upload-crop-details" && <UploadCropDetails />}
         {page === "region-disable-monitoring" && <DisableMonitoring />}
 
       </AdminLayout>

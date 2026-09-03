@@ -51,6 +51,7 @@ export default function AdminSidebar({ setPage }: any) {
       items: [
         { label: "Create Region", icon: <AddLocationAltIcon />, key: "region-create" },
         { label: "View Regions", icon: <ListAltIcon />, key: "region-management" },
+        { label: "Upload Crop Details", icon: <ListAltIcon />, key: "region-upload-crop-details" },
         { label: "Disable Monitoring", icon: <ToggleOffIcon />, key: "region-disable-monitoring" }
       ]
     }

@@ -183,6 +183,54 @@ export const getRegionsByOrg = (organization_id: number) =>
 export const disableMonitoring = (farm_id: number) =>
   handle(api.patch(`/region/${farm_id}/disable-monitoring`));
 
+export const saveRegionMappings = async (regionId: number | string, payload: Record<string, unknown>) => {
+  const attempts = [
+    () => handle(api.patch(`/region/${regionId}/mapping`, payload)),
+    () => handle(api.put(`/region/${regionId}/mapping`, payload)),
+    () => handle(api.patch(`/regions/${regionId}/mapping`, payload)),
+    () => handle(api.put(`/regions/${regionId}/mapping`, payload)),
+    () => handle(api.patch(`/region/${regionId}/fields`, payload)),
+    () => handle(api.patch(`/regions/${regionId}/fields`, payload)),
+    () => handle(api.post(`/region/${regionId}/mapping`, payload)),
+    () => handle(api.post(`/regions/${regionId}/mapping`, payload))
+  ];
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      return await attempt();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return Promise.reject(lastError ?? { message: "Failed to save region mappings." });
+};
+
+export const uploadCropDetailsExcel = async (regionId: number | string, payload: Record<string, unknown>) => {
+  const attempts = [
+    () => handle(api.post(`/region/${regionId}/crop-details`, payload)),
+    () => handle(api.post(`/regions/${regionId}/crop-details`, payload)),
+    () => handle(api.post(`/region/${regionId}/upload-crop-details`, payload)),
+    () => handle(api.post(`/regions/${regionId}/upload-crop-details`, payload)),
+    () => handle(api.post(`/crop-details/upload`, { region_id: regionId, ...payload })),
+    () => handle(api.post(`/crop-data/upload`, { region_id: regionId, ...payload })),
+    () => handle(api.post(`/region/upload`, { region_id: regionId, ...payload })),
+    () => handle(api.post(`/regions/upload`, { region_id: regionId, ...payload }))
+  ];
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      return await attempt();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return Promise.reject(lastError ?? { message: "Failed to upload crop details Excel." });
+};
+
 // ==============================
 // 📊 ADMIN DASHBOARD
 // ==============================
