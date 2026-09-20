@@ -165,7 +165,7 @@ export default function UploadRegion() {
       await updateRegionFromImport({
         region_id: form.region_id,
         name: selectedRegion?.name,
-        file,
+        file_content: file,
         file_name: fileName,
 
         monitoring: {
