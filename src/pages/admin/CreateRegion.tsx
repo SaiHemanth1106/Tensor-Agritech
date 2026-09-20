@@ -163,7 +163,7 @@ export default function CreateRegion() {
       await updateRegionFromImport({
         region_id: regionId,
         name: form.name.trim(),
-        file: kmlFile,
+        file_content: kmlFile,
         file_name: fileName
       });
       const importDetail = "Completed successfully. Verify the imported values in Region Management.";

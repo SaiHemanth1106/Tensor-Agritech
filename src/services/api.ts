@@ -157,7 +157,7 @@ export interface RegionImportPayload {
   region_id: number | string;
   name?: string;
   /** Base64 KML content consumed by the region-import Lambda. */
-  file: string;
+  file_content: string;
   file_name?: string;
   /** Base64 Excel content consumed by the region-import Lambda. */
   crop_data_file?: string;
