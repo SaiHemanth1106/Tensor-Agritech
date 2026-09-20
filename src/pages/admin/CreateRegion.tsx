@@ -88,39 +88,94 @@ export default function CreateRegion() {
         : "Waiting for valid region details.";
 
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
-    setError("");
-    setMessage("");
-    setUploadStatus("");
+  const selectedFile = event.target.files?.[0];
 
-    if (!selectedFile.name.toLowerCase().endsWith(".kml")) {
-      setKmlFile(null); setFileName(""); setGeometry("");
-      setError("Please select a valid KML file.");
-      return;
-    }
+  if (!selectedFile) return;
 
-    const dataReader = new FileReader();
-    dataReader.onload = () => setKmlFile((dataReader.result as string).split(",")[1]);
-    dataReader.readAsDataURL(selectedFile);
+  setError("");
+  setMessage("");
+  setUploadStatus("");
+  setKmlFile(null);
+  setFileName("");
+  setGeometry("");
 
-    const textReader = new FileReader();
-    textReader.onload = () => {
-      try {
-        const document = new DOMParser().parseFromString(textReader.result as string, "text/xml");
-        if (document.querySelector("parsererror")) throw new Error("Invalid KML");
-        const geoJson = toGeoJSON.kml(document);
-        if (!geoJson.features.length) throw new Error("No geometry found");
-        setGeometry(JSON.stringify(geoJson));
-        setFileName(selectedFile.name);
-        setUploadStatus("KML ready to upload when you create the region.");
-      } catch {
-        setKmlFile(null); setFileName(""); setGeometry("");
-        setError("The KML file could not be read or does not contain a region geometry.");
+  if (!selectedFile.name.toLowerCase().endsWith(".kml")) {
+    setError("Please select a valid KML file.");
+    return;
+  }
+
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    try {
+      const result = reader.result as string;
+
+      // ------------------------------------
+      // 1. Store Base64 KML
+      // ------------------------------------
+      const base64Content = result.includes(",")
+        ? result.split(",")[1]
+        : result;
+
+      if (!base64Content) {
+        throw new Error("Unable to read KML file.");
       }
-    };
-    textReader.readAsText(selectedFile);
+
+      // ------------------------------------
+      // 2. Parse KML geometry
+      // ------------------------------------
+      const textReader = new FileReader();
+
+      textReader.onload = () => {
+        try {
+          const document = new DOMParser().parseFromString(
+            textReader.result as string,
+            "text/xml"
+          );
+
+          if (document.querySelector("parsererror")) {
+            throw new Error("Invalid KML");
+          }
+
+          const geoJson = toGeoJSON.kml(document);
+
+          if (!geoJson.features.length) {
+            throw new Error("No geometry found");
+          }
+
+          // ------------------------------------
+          // 3. Set ALL file data together
+          // ------------------------------------
+          setKmlFile(base64Content);
+          setFileName(selectedFile.name);
+          setGeometry(JSON.stringify(geoJson));
+
+          setUploadStatus(
+            "KML ready to upload when you create the region."
+          );
+        } catch {
+          setKmlFile(null);
+          setFileName("");
+          setGeometry("");
+
+          setError(
+            "The KML file could not be read or does not contain a region geometry."
+          );
+        }
+      };
+
+      textReader.readAsText(selectedFile);
+    } catch {
+      setKmlFile(null);
+      setFileName("");
+      setGeometry("");
+
+      setError("Unable to read the selected KML file.");
+    }
   };
+
+  reader.readAsDataURL(selectedFile);
+};
 
   const handleSubmit = async () => {
     setMessage(""); setError("");
@@ -131,10 +186,19 @@ export default function CreateRegion() {
       const validationError = "All region details are required.";
       setError(validationError); showNotification("error", validationError); return;
     }
-    if (!kmlFile || !geometry) {
-      const validationError = "Upload a valid KML file before creating the region.";
-      setError(validationError); showNotification("error", validationError); return;
-    }
+    if (!kmlFile) {
+  const validationError = "KML file is still being read. Please wait a moment and try again.";
+  setError(validationError);
+  showNotification("error", validationError);
+  return;
+}
+
+if (!geometry) {
+  const validationError = "KML geometry could not be extracted.";
+  setError(validationError);
+  showNotification("error", validationError);
+  return;
+}
     const regionArea = Number(form.area);
     if (!Number.isFinite(regionArea) || regionArea <= 0) {
       const validationError = "Region area must be a number greater than zero.";
