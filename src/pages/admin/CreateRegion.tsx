@@ -182,7 +182,7 @@ export default function CreateRegion() {
     setCompletionOpen(false);
     setLambdaResults(initialLambdaResults);
     setProcessStarted(true);
-    if (Object.values(form).some((value) => !value.trim())) {
+    if (Object.values(form).some((value) => !String(value).trim())) {
       const validationError = "All region details are required.";
       setError(validationError); showNotification("error", validationError); return;
     }
