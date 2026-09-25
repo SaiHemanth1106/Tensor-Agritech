@@ -1,0 +1,13 @@
+/* src/styles.css */
+body {
+  margin: 0;
+  font-family: Roboto, sans-serif;
+  background: #F5F7FA;
+}
+iframe {
+  border: none;
+}
+.leaflet-container {
+  height: 600px;
+  width: 100%;
+}
