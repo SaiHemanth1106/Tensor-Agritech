@@ -1,15 +1,10 @@
 ﻿import { useEffect, useState } from "react";
 import type { ChangeEvent } from "react";
-
 import {
   Alert,
   Box,
   Button,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControl,
   InputLabel,
   LinearProgress,
@@ -20,65 +15,27 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-
-import { createRegion, getOrganizations } from "../../services/api";
-
-// ============================================================
-// TYPES
-// ============================================================
+import * as toGeoJSON from "@tmcw/togeojson";
+import { getOrganizations } from "../../services/api";
 
 interface Organization {
   id: number;
   name: string;
 }
 
-interface CreateRegionResponse {
-  success?: boolean;
-  message?: string;
-
-  region?: {
-    region_id?: number | string;
-    name?: string;
-  };
-
-  kml?: {
-    bucket?: string;
-    s3_key?: string;
-    s3_uri?: string;
-    file_name?: string;
-    file_size?: number;
-  };
-
-  fields?: {
-    count?: number;
-  };
-}
-
-// ============================================================
-// INITIAL FORM
-// ============================================================
-
-const initialForm = {
-  organizationId: "",
-  name: "",
-  description: "",
-  area: "",
-};
-
-// ============================================================
-// COMPONENT
-// ============================================================
-
-export default function CreateRegion() {
+const CreateRegion = () => {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
 
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState({
+    organizationId: "",
+    name: "",
+    description: "",
+    area: "",
+  });
 
-  // Base64 KML
   const [kmlFile, setKmlFile] = useState<string | null>(null);
-
-  // Original file name
   const [fileName, setFileName] = useState("");
+  const [geometry, setGeometry] = useState<unknown>(null);
 
   const [loadingOrganizations, setLoadingOrganizations] =
     useState(true);
@@ -86,400 +43,464 @@ export default function CreateRegion() {
   const [submitting, setSubmitting] = useState(false);
 
   const [uploadStatus, setUploadStatus] = useState("");
-
   const [message, setMessage] = useState("");
-
   const [error, setError] = useState("");
 
-  const [completionOpen, setCompletionOpen] = useState(false);
-
-  const [progress, setProgress] = useState(0);
-
-  const [processStatus, setProcessStatus] = useState<
-    "pending" | "running" | "success" | "error"
-  >("pending");
-
-  const [processDetail, setProcessDetail] = useState(
-    "Not started"
-  );
-
-  const [notification, setNotification] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
+  const [notification, setNotification] = useState({
     open: false,
     message: "",
-    severity: "success",
+    severity: "success" as
+      | "success"
+      | "error"
+      | "info"
+      | "warning",
   });
 
-  // ============================================================
-  // LOAD ORGANIZATIONS
-  // ============================================================
+  // ==============================
+  // STEP 2
+  // ==============================
+  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
 
+  const [createdRegionName, setCreatedRegionName] =
+    useState("");
+
+  const [cropExcelFile, setCropExcelFile] =
+    useState<string | null>(null);
+
+  const [cropExcelFileName, setCropExcelFileName] =
+    useState("");
+
+  const [uploadingCropDetails, setUploadingCropDetails] =
+    useState(false);
+
+  const [cropUploadError, setCropUploadError] =
+    useState("");
+
+  const [cropUploadSuccess, setCropUploadSuccess] =
+    useState("");
+
+  // ==============================
+  // LOAD ORGANIZATIONS
+  // ==============================
   useEffect(() => {
     const loadOrganizations = async () => {
       try {
-        const result = await getOrganizations();
+        setLoadingOrganizations(true);
 
-        setOrganizations(result);
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load organizations."
+        const response = await getOrganizations();
+
+        const data = Array.isArray(response)
+          ? response
+          : response?.data ||
+            response?.organizations ||
+            [];
+
+        setOrganizations(data);
+      } catch (err) {
+        console.error(
+          "Failed to load organizations:",
+          err
         );
+
+        setError("Failed to load organizations.");
       } finally {
         setLoadingOrganizations(false);
       }
     };
 
-    void loadOrganizations();
+    loadOrganizations();
   }, []);
 
-  // ============================================================
-  // UPDATE FORM
-  // ============================================================
-
+  // ==============================
+  // FORM UPDATE
+  // ==============================
   const updateField = (
-    field: keyof typeof form,
+    field: string,
     value: string
   ) => {
-    setForm((current) => ({
-      ...current,
+    setForm((prev) => ({
+      ...prev,
       [field]: value,
     }));
   };
 
-  // ============================================================
+  // ==============================
   // NOTIFICATION
-  // ============================================================
-
+  // ==============================
   const showNotification = (
-    severity: "success" | "error",
-    notificationMessage: string
+    msg: string,
+    severity:
+      | "success"
+      | "error"
+      | "info"
+      | "warning" = "success"
   ) => {
     setNotification({
       open: true,
+      message: msg,
       severity,
-      message: notificationMessage,
     });
   };
 
-  // ============================================================
-  // KML FILE
-  // ============================================================
-
-  const handleFile = (
+  // ==============================
+  // KML HANDLER
+  // ==============================
+  const handleFile = async (
     event: ChangeEvent<HTMLInputElement>
   ) => {
-    const selectedFile = event.target.files?.[0];
+    const file = event.target.files?.[0];
 
-    if (!selectedFile) {
+    if (!file) {
       return;
     }
 
     setError("");
     setMessage("");
     setUploadStatus("");
-    setKmlFile(null);
-    setFileName("");
 
-    // ----------------------------------------------------------
-    // Validate extension
-    // ----------------------------------------------------------
-
-    if (
-      !selectedFile.name
-        .toLowerCase()
-        .endsWith(".kml")
-    ) {
-      setError("Please select a valid KML file.");
+    if (!file.name.toLowerCase().endsWith(".kml")) {
+      setError("Please upload a valid KML file.");
       return;
     }
 
-    // ----------------------------------------------------------
-    // Read file as Base64
-    // ----------------------------------------------------------
+    try {
+      const reader = new FileReader();
+
+      reader.onload = async () => {
+        try {
+          const result = reader.result;
+
+          if (typeof result !== "string") {
+            throw new Error(
+              "Unable to read KML file."
+            );
+          }
+
+          const base64 = result.split(",")[1];
+
+          if (!base64) {
+            throw new Error("Invalid KML file.");
+          }
+
+          const textReader = new FileReader();
+
+          textReader.onload = () => {
+            try {
+              const text = String(
+                textReader.result
+              );
+
+              const parser = new DOMParser();
+
+              const xml =
+                parser.parseFromString(
+                  text,
+                  "application/xml"
+                );
+
+              const parseError =
+                xml.querySelector(
+                  "parsererror"
+                );
+
+              if (parseError) {
+                throw new Error(
+                  "Invalid KML XML format."
+                );
+              }
+
+              const geojson =
+                toGeoJSON.kml(xml);
+
+              if (
+                !geojson ||
+                !geojson.features ||
+                geojson.features.length === 0
+              ) {
+                throw new Error(
+                  "No geographic features found in the KML file."
+                );
+              }
+
+              setKmlFile(base64);
+              setFileName(file.name);
+              setGeometry(geojson);
+
+              setUploadStatus(
+                "KML file selected successfully."
+              );
+            } catch (err) {
+              console.error(
+                "KML parsing error:",
+                err
+              );
+
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : "Failed to process KML file."
+              );
+
+              setKmlFile(null);
+              setFileName("");
+              setGeometry(null);
+            }
+          };
+
+          textReader.readAsText(file);
+        } catch (err) {
+          console.error(
+            "KML read error:",
+            err
+          );
+
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to read KML file."
+          );
+        }
+      };
+
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error(
+        "KML upload error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to upload KML file."
+      );
+    }
+  };
+
+  // ==============================
+  // CREATE REGION
+  // UI ONLY - NO BACKEND CALL
+  // ==============================
+  const handleSubmit = () => {
+    setMessage("");
+    setError("");
+    setUploadStatus("");
+
+    // Organisation validation
+    if (!form.organizationId) {
+      setError(
+        "Please select an Organisation."
+      );
+      return;
+    }
+
+    // Region name validation
+    if (!form.name.trim()) {
+      setError(
+        "Please enter Region Name."
+      );
+      return;
+    }
+
+    // Description validation
+    if (!form.description.trim()) {
+      setError(
+        "Please enter Description."
+      );
+      return;
+    }
+
+    // Area validation
+    if (!form.area.trim()) {
+      setError(
+        "Please enter Region Area."
+      );
+      return;
+    }
+
+    const numericArea = Number(form.area);
+
+    if (
+      Number.isNaN(numericArea) ||
+      numericArea <= 0
+    ) {
+      setError(
+        "Region Area must be a positive number."
+      );
+      return;
+    }
+
+    // KML validation
+    if (!kmlFile || !geometry) {
+      setError(
+        "Please upload a valid KML file."
+      );
+      return;
+    }
+
+    // ==============================
+    // STORE REGION NAME FOR STEP 2
+    // ==============================
+    setCreatedRegionName(
+      form.name.trim()
+    );
+
+    // Clear old Excel state
+    setCropExcelFile(null);
+    setCropExcelFileName("");
+    setCropUploadError("");
+    setCropUploadSuccess("");
+
+    // ==============================
+    // DIRECTLY OPEN STEP 2
+    // ==============================
+    setCurrentStep(2);
+
+    showNotification(
+      "Region details completed. Please upload crop details Excel file.",
+      "success"
+    );
+  };
+
+  // ==============================
+  // EXCEL FILE HANDLER
+  // ==============================
+  const handleCropExcelFile = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setCropUploadError("");
+    setCropUploadSuccess("");
+
+    const lowerName =
+      file.name.toLowerCase();
+
+    if (
+      !lowerName.endsWith(".xlsx") &&
+      !lowerName.endsWith(".xls")
+    ) {
+      setCropExcelFile(null);
+      setCropExcelFileName("");
+
+      setCropUploadError(
+        "Please upload a valid Excel file (.xlsx or .xls)."
+      );
+
+      return;
+    }
 
     const reader = new FileReader();
 
     reader.onload = () => {
       try {
-        const result = reader.result as string;
+        const result = reader.result;
 
-        const base64Content = result.includes(",")
-          ? result.split(",")[1]
-          : result;
-
-        if (!base64Content) {
+        if (typeof result !== "string") {
           throw new Error(
-            "Unable to read KML file."
+            "Unable to read Excel file."
           );
         }
 
-        setKmlFile(base64Content);
+        const base64 = result.split(",")[1];
 
-        setFileName(selectedFile.name);
+        if (!base64) {
+          throw new Error(
+            "Invalid Excel file."
+          );
+        }
 
-        setUploadStatus(
-          "KML file is ready to upload."
+        setCropExcelFile(base64);
+        setCropExcelFileName(file.name);
+
+        setCropUploadSuccess(
+          "Excel file selected successfully."
         );
-      } catch {
-        setKmlFile(null);
-        setFileName("");
+      } catch (err) {
+        console.error(
+          "Excel file error:",
+          err
+        );
 
-        setError(
-          "Unable to read the selected KML file."
+        setCropExcelFile(null);
+        setCropExcelFileName("");
+
+        setCropUploadError(
+          err instanceof Error
+            ? err.message
+            : "Failed to read Excel file."
         );
       }
     };
 
     reader.onerror = () => {
-      setKmlFile(null);
-      setFileName("");
-
-      setError(
-        "Unable to read the selected KML file."
+      setCropUploadError(
+        "Failed to read Excel file."
       );
     };
 
-    reader.readAsDataURL(selectedFile);
+    reader.readAsDataURL(file);
   };
 
-  // ============================================================
-  // CREATE REGION
-  // ============================================================
+  // ==============================
+  // SAVE CROP DETAILS
+  // UI ONLY - NO BACKEND CALL
+  // ==============================
+  const handleCropDetailsUpload =
+    () => {
+      setCropUploadError("");
+      setCropUploadSuccess("");
 
-  const handleSubmit = async () => {
-    setMessage("");
-    setError("");
-    setCompletionOpen(false);
+      if (!cropExcelFile) {
+        setCropUploadError(
+          "Please upload an Excel file."
+        );
+        return;
+      }
 
-    // ----------------------------------------------------------
-    // VALIDATE FORM
-    // ----------------------------------------------------------
+      setUploadingCropDetails(true);
 
-    if (
-      Object.values(form).some(
-        (value) => !String(value).trim()
-      )
-    ) {
-      const validationError =
-        "All region details are required.";
+      // UI confirmation only
+      setTimeout(() => {
+        setUploadingCropDetails(false);
 
-      setError(validationError);
+        setCropUploadSuccess(
+          "Crop details Excel file saved successfully."
+        );
 
-      showNotification(
-        "error",
-        validationError
-      );
+        showNotification(
+          "Crop details saved successfully.",
+          "success"
+        );
+      }, 500);
+    };
 
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // VALIDATE KML
-    // ----------------------------------------------------------
-
-    if (!kmlFile) {
-      const validationError =
-        "Please select a KML file.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // VALIDATE AREA
-    // ----------------------------------------------------------
-
-    const regionArea = Number(form.area);
-
-    if (
-      !Number.isFinite(regionArea) ||
-      regionArea <= 0
-    ) {
-      const validationError =
-        "Region area must be a number greater than zero.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ==========================================================
-    // START PROCESS
-    // ==========================================================
-
-    try {
-      setSubmitting(true);
-
-      setProgress(25);
-
-      setProcessStatus("running");
-
-      setProcessDetail(
-        "Sending region and KML to AWS..."
-      );
-
-      setUploadStatus(
-        "Creating region and processing KML..."
-      );
-
-      // ========================================================
-      // SINGLE API CALL
-      // ========================================================
-
-      const result =
-        (await createRegion({
-          organization_id:
-            Number(form.organizationId),
-
-          name: form.name.trim(),
-
-          description:
-            form.description.trim(),
-
-          region_area: regionArea,
-
-          kml_file_name: fileName,
-
-          kml_file_content: kmlFile,
-        })) as CreateRegionResponse;
-
-      // ========================================================
-      // SUCCESS
-      // ========================================================
-
-      setProgress(100);
-
-      setProcessStatus("success");
-
-      const regionId =
-        result?.region?.region_id;
-
-      const fieldCount =
-        result?.fields?.count ?? 0;
-
-      const successDetail = regionId
-        ? `Region ID ${regionId} created successfully. ${fieldCount} field geometry record(s) imported.`
-        : `Region created successfully. ${fieldCount} field geometry record(s) imported.`;
-
-      setProcessDetail(successDetail);
-
-      setMessage(
-        "Region and KML processed successfully."
-      );
-
-      setUploadStatus(
-        "Region creation and KML processing completed."
-      );
-
-      showNotification(
-        "success",
-        successDetail
-      );
-
-      setCompletionOpen(true);
-
-      // --------------------------------------------------------
-      // Reset form
-      // --------------------------------------------------------
-
-      setForm(initialForm);
-
-      setKmlFile(null);
-
-      setFileName("");
-    } catch (submitError: unknown) {
-      // ========================================================
-      // ERROR
-      // ========================================================
-
-      setProgress(75);
-
-      setProcessStatus("error");
-
-      const detail =
-        submitError instanceof Error
-          ? submitError.message
-          : typeof submitError === "object" &&
-              submitError &&
-              "message" in submitError
-            ? String(
-                (
-                  submitError as {
-                    message?: unknown;
-                  }
-                ).message
-              )
-            : "Failed to create region.";
-
-      setProcessDetail(detail);
-
-      setError(detail);
-
-      setUploadStatus("");
-
-      showNotification(
-        "error",
-        detail
-      );
-
-      setCompletionOpen(true);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // ============================================================
-  // UI
-  // ============================================================
-
-  return (
-    <Box
-      maxWidth={650}
-      mx="auto"
-    >
+  // ==============================
+  // STEP 1
+  // ==============================
+  const renderCreateRegionStep =
+    () => (
       <Paper
         elevation={3}
         sx={{
-          p: 4,
-          borderRadius: 3,
+          maxWidth: 650,
+          margin: "0 auto",
+          padding: 3,
         }}
       >
         <Typography
           variant="h5"
-          fontWeight="bold"
-          mb={3}
+          sx={{
+            fontWeight: 600,
+            mb: 2,
+          }}
         >
           📍 Create Region
         </Typography>
-
-        {/* ERROR */}
-
-        {error && (
-          <Alert
-            severity="error"
-            sx={{ mb: 2 }}
-          >
-            {error}
-          </Alert>
-        )}
-
-        {/* SUCCESS */}
 
         {message && (
           <Alert
@@ -490,53 +511,62 @@ export default function CreateRegion() {
           </Alert>
         )}
 
-        {/* ORGANIZATION */}
+        {error && (
+          <Alert
+            severity="error"
+            sx={{ mb: 2 }}
+          >
+            {error}
+          </Alert>
+        )}
 
         <FormControl
           fullWidth
-          required
           sx={{ mb: 2 }}
-          disabled={
-            loadingOrganizations ||
-            submitting
-          }
         >
           <InputLabel>
-            Organisation ID
+            Organisation ID *
           </InputLabel>
 
           <Select
             value={form.organizationId}
-            label="Organisation ID"
+            label="Organisation ID *"
             onChange={(event) =>
               updateField(
                 "organizationId",
-                event.target.value
+                String(event.target.value)
               )
             }
+            disabled={
+              loadingOrganizations ||
+              submitting
+            }
           >
-            {organizations.map(
-              (organization) => (
-                <MenuItem
-                  key={organization.id}
-                  value={organization.id}
-                >
-                  {organization.id} —{" "}
-                  {organization.name}
-                </MenuItem>
+            {loadingOrganizations ? (
+              <MenuItem value="">
+                Loading organizations...
+              </MenuItem>
+            ) : (
+              organizations.map(
+                (organization) => (
+                  <MenuItem
+                    key={organization.id}
+                    value={
+                      organization.id
+                    }
+                  >
+                    {organization.id} -{" "}
+                    {organization.name}
+                  </MenuItem>
+                )
               )
             )}
           </Select>
         </FormControl>
 
-        {/* REGION NAME */}
-
         <TextField
-          label="Region Name"
           fullWidth
-          required
-          disabled={submitting}
-          sx={{ mb: 2 }}
+          label="Region Name *"
           value={form.name}
           onChange={(event) =>
             updateField(
@@ -544,18 +574,13 @@ export default function CreateRegion() {
               event.target.value
             )
           }
-        />
-
-        {/* DESCRIPTION */}
-
-        <TextField
-          label="Description"
-          fullWidth
-          required
-          multiline
-          rows={3}
           disabled={submitting}
           sx={{ mb: 2 }}
+        />
+
+        <TextField
+          fullWidth
+          label="Description *"
           value={form.description}
           onChange={(event) =>
             updateField(
@@ -563,22 +588,15 @@ export default function CreateRegion() {
               event.target.value
             )
           }
+          disabled={submitting}
+          sx={{ mb: 2 }}
+          multiline
+          rows={3}
         />
 
-        {/* AREA */}
-
         <TextField
-          label="Region Area"
           fullWidth
-          required
-          type="number"
-          disabled={submitting}
-          inputProps={{
-            min: 0,
-            step: "any",
-          }}
-          helperText="Enter the area in the unit required by the backend."
-          sx={{ mb: 3 }}
+          label="Region Area *"
           value={form.area}
           onChange={(event) =>
             updateField(
@@ -586,15 +604,18 @@ export default function CreateRegion() {
               event.target.value
             )
           }
+          disabled={submitting}
+          sx={{ mb: 2 }}
+          type="number"
         />
-
-        {/* KML */}
 
         <Box sx={{ mb: 2 }}>
           <Typography
-            variant="subtitle1"
-            fontWeight="medium"
-            mb={1}
+            variant="body2"
+            sx={{
+              mb: 1,
+              fontWeight: 500,
+            }}
           >
             Region KML *
           </Typography>
@@ -604,14 +625,16 @@ export default function CreateRegion() {
             variant="outlined"
             fullWidth
             disabled={submitting}
+            sx={{
+              height: 40,
+            }}
           >
-            Upload KML
+            UPLOAD KML
 
             <input
-              hidden
-              required
               type="file"
-              accept=".kml,application/vnd.google-earth.kml+xml"
+              hidden
+              accept=".kml"
               onChange={handleFile}
             />
           </Button>
@@ -619,63 +642,17 @@ export default function CreateRegion() {
           {fileName && (
             <Typography
               variant="body2"
-              sx={{ mt: 1 }}
+              sx={{
+                mt: 1,
+                color:
+                  "text.secondary",
+              }}
             >
-              Selected file: {fileName}
+              Selected file:{" "}
+              {fileName}
             </Typography>
           )}
         </Box>
-
-        {/* PROCESS STATUS */}
-
-        {processStatus !== "pending" && (
-          <Box sx={{ mb: 2 }}>
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              mb={0.75}
-            >
-              <Typography
-                variant="body2"
-                fontWeight="medium"
-              >
-                Region processing
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-              >
-                {progress}%
-              </Typography>
-            </Box>
-
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              color={
-                processStatus === "error"
-                  ? "error"
-                  : "primary"
-              }
-              sx={{
-                height: 8,
-                borderRadius: 1,
-                mb: 1,
-              }}
-            />
-
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-            >
-              {processDetail}
-            </Typography>
-          </Box>
-        )}
-
-        {/* STATUS */}
 
         {uploadStatus && (
           <Alert
@@ -686,101 +663,195 @@ export default function CreateRegion() {
           </Alert>
         )}
 
-        {/* CREATE BUTTON */}
-
         <Button
-          variant="contained"
           fullWidth
+          variant="contained"
           onClick={handleSubmit}
-          disabled={
-            submitting ||
-            loadingOrganizations
-          }
+          disabled={submitting}
+          sx={{
+            backgroundColor:
+              "#075d16",
+            "&:hover": {
+              backgroundColor:
+                "#064d12",
+            },
+          }}
         >
           {submitting ? (
-            <CircularProgress
-              size={24}
-              color="inherit"
-            />
+            <>
+              <CircularProgress
+                size={22}
+                color="inherit"
+                sx={{ mr: 1 }}
+              />
+              PROCESSING...
+            </>
           ) : (
-            "Create Region"
+            "CREATE REGION"
           )}
         </Button>
       </Paper>
+    );
 
-      {/* COMPLETION DIALOG */}
-
-      <Dialog
-        open={completionOpen}
-        onClose={() =>
-          setCompletionOpen(false)
-        }
-        fullWidth
-        maxWidth="sm"
+  // ==============================
+  // STEP 2
+  // ==============================
+  const renderCropDetailsStep =
+    () => (
+      <Paper
+        elevation={3}
+        sx={{
+          maxWidth: 650,
+          margin: "0 auto",
+          padding: 3,
+        }}
       >
-        <DialogTitle>
-          {processStatus === "success"
-            ? "Region Process Completed"
-            : "Region Process Failed"}
-        </DialogTitle>
+        <Typography
+          variant="h5"
+          sx={{
+            fontWeight: 600,
+            mb: 3,
+          }}
+        >
+          📊 Upload Crop Details
+        </Typography>
 
-        <DialogContent>
+        {cropUploadSuccess && (
           <Alert
-            severity={
-              processStatus === "success"
-                ? "success"
-                : "error"
-            }
+            severity="success"
+            sx={{ mb: 2 }}
           >
-            <Typography fontWeight="bold">
-              uploadRegion Lambda:{" "}
-              {processStatus}
-            </Typography>
-
-            {processDetail}
+            {cropUploadSuccess}
           </Alert>
-        </DialogContent>
+        )}
 
-        <DialogActions>
-          <Button
-            onClick={() =>
-              setCompletionOpen(false)
-            }
+        {cropUploadError && (
+          <Alert
+            severity="error"
+            sx={{ mb: 2 }}
           >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+            {cropUploadError}
+          </Alert>
+        )}
 
-      {/* SNACKBAR */}
+        <TextField
+          fullWidth
+          label="Region"
+          value={createdRegionName}
+          disabled
+          sx={{ mb: 3 }}
+        />
+
+        <Box sx={{ mb: 3 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              mb: 1,
+              fontWeight: 500,
+            }}
+          >
+            Upload Excel Format File
+          </Typography>
+
+          <Button
+            component="label"
+            variant="outlined"
+            fullWidth
+            disabled={
+              uploadingCropDetails
+            }
+            sx={{
+              height: 45,
+            }}
+          >
+            UPLOAD EXCEL FILE
+
+            <input
+              type="file"
+              hidden
+              accept=".xlsx,.xls"
+              onChange={
+                handleCropExcelFile
+              }
+            />
+          </Button>
+
+          {cropExcelFileName && (
+            <Typography
+              variant="body2"
+              sx={{
+                mt: 1,
+                color:
+                  "text.secondary",
+              }}
+            >
+              Selected file:{" "}
+              {cropExcelFileName}
+            </Typography>
+          )}
+        </Box>
+
+        <Button
+          fullWidth
+          variant="contained"
+          onClick={
+            handleCropDetailsUpload
+          }
+          disabled={
+            uploadingCropDetails ||
+            !cropExcelFile
+          }
+          sx={{
+            backgroundColor:
+              "#075d16",
+            "&:hover": {
+              backgroundColor:
+                "#064d12",
+            },
+          }}
+        >
+          {uploadingCropDetails ? (
+            <>
+              <CircularProgress
+                size={22}
+                color="inherit"
+                sx={{ mr: 1 }}
+              />
+              SAVING...
+            </>
+          ) : (
+            "SAVE"
+          )}
+        </Button>
+      </Paper>
+    );
+
+  // ==============================
+  // MAIN UI
+  // ==============================
+  return (
+    <>
+      {currentStep === 1
+        ? renderCreateRegionStep()
+        : renderCropDetailsStep()}
 
       <Snackbar
         open={notification.open}
-        autoHideDuration={6000}
+        autoHideDuration={5000}
         onClose={() =>
           setNotification(
-            (current) => ({
-              ...current,
+            (prev) => ({
+              ...prev,
               open: false,
             })
           )
         }
-      >
-        <Alert
-          severity={notification.severity}
-          variant="filled"
-          onClose={() =>
-            setNotification(
-              (current) => ({
-                ...current,
-                open: false,
-              })
-            )
-          }
-        >
-          {notification.message}
-        </Alert>
-      </Snackbar>
-    </Box>
+        message={
+          notification.message
+        }
+      />
+    </>
   );
-}
+};
+
+export default CreateRegion;
