@@ -214,30 +214,46 @@ export const saveRegionMappings = async (regionId: number | string, payload: Rec
   return Promise.reject(lastError ?? { message: "Failed to save region mappings." });
 };
 
-export const uploadCropDetailsExcel = async (regionId: number | string, payload: Record<string, unknown>) => {
-  const attempts = [
-    () => handle(api.post(`/region/${regionId}/crop-details`, payload)),
-    () => handle(api.post(`/regions/${regionId}/crop-details`, payload)),
-    () => handle(api.post(`/region/${regionId}/upload-crop-details`, payload)),
-    () => handle(api.post(`/regions/${regionId}/upload-crop-details`, payload)),
-    () => handle(api.post(`/crop-details/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/crop-data/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/region/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/regions/upload`, { region_id: regionId, ...payload }))
-  ];
+export const uploadCropDetailsExcel = async (
+  regionId: number | string,
+  payload: any
+) => {
+  const body = {
+    region_id: Number(payload.region_id || regionId),
 
-  let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      return await attempt();
-    } catch (error) {
-      lastError = error;
-    }
+    file_name:
+      payload.file_name ||
+      payload.crop_data_file_name,
+
+    file_content:
+      payload.file_content ||
+      payload.crop_data_file,
+  };
+
+  try {
+    const response = await api.post(
+      "/s1/region/crops/upload",
+      body
+    );
+
+    return response.data;
+  } catch (err: any) {
+    console.error(
+      "UPLOAD CROP DETAILS ERROR:",
+      err?.response?.data
+    );
+
+    const data = err?.response?.data;
+
+    throw new Error(
+      data?.details ||
+      data?.error ||
+      data?.message ||
+      err?.message ||
+      "Crop Excel upload failed"
+    );
   }
-
-  return Promise.reject(lastError ?? { message: "Failed to upload crop details Excel." });
 };
-
 // ==============================
 // 📊 ADMIN DASHBOARD
 // ==============================

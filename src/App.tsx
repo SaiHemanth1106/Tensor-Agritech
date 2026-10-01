@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+
 import Login from "./pages/Login";
 
 // USER LAYOUT
@@ -26,83 +27,251 @@ import RegionManagement from "./pages/admin/RegionManagement";
 import UploadCropDetails from "./pages/admin/UploadCropDetails";
 
 export default function App() {
-
   const [user, setUser] = useState<any>(null);
-  const [page, setPage] = useState<string>(""); // ✅ EMPTY INIT
 
-  // 🔄 Restore user on refresh
+  const [page, setPage] =
+    useState<string>("");
+
+  // ============================================================
+  // RESTORE USER
+  // ============================================================
+
   useEffect(() => {
-    const stored = localStorage.getItem("user");
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      setUser(parsed);
+    const stored =
+      localStorage.getItem("user");
+
+    if (!stored) {
+      return;
+    }
+
+    try {
+      setUser(
+        JSON.parse(stored)
+      );
+    } catch {
+      localStorage.removeItem(
+        "user"
+      );
     }
   }, []);
 
-  // ✅ CENTRALIZED REDIRECT LOGIC
-  useEffect(() => {
-    if (!user) return;
+  // ============================================================
+  // DEFAULT PAGE
+  // ============================================================
 
-    if (user.role === "admin") {
-      setPage("admin-dashboard");
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    if (
+      user.role === "admin"
+    ) {
+      setPage(
+        "admin-dashboard"
+      );
     } else {
-      setPage("dashboard");
+      setPage(
+        "dashboard"
+      );
     }
   }, [user]);
 
-  // 🚪 Logout
+  // ============================================================
+  // LOGOUT
+  // ============================================================
+
   const handleLogout = () => {
     localStorage.clear();
+
     setUser(null);
+
     setPage("");
   };
 
-  // 🔐 Login fallback
+  // ============================================================
+  // CREATE REGION COMPLETED
+  //
+  // SUCCESS POPUP CLOSE
+  //        ↓
+  // UPLOAD CROP DETAILS
+  // ============================================================
+
+  const handleRegionCreated = (
+    regionId:
+      | string
+      | number,
+
+    regionName: string
+  ) => {
+    localStorage.setItem(
+      "pendingCropRegion",
+
+      JSON.stringify({
+        regionId:
+          String(regionId),
+
+        regionName,
+      })
+    );
+
+    // AUTOMATIC REDIRECT
+    setPage(
+      "region-upload-crop-details"
+    );
+  };
+
+  // ============================================================
+  // CROP MAPPING COMPLETED
+  //
+  //        ↓
+  // VIEW REGIONS
+  // ============================================================
+
+  const handleCropMappingComplete =
+    (
+      regionName: string
+    ) => {
+      localStorage.setItem(
+        "lastCompletedRegionName",
+        regionName
+      );
+
+      setPage(
+        "region-management"
+      );
+    };
+
+  // ============================================================
+  // LOGIN
+  // ============================================================
+
   if (!user) {
-    return <Login setUser={setUser} />;
+    return (
+      <Login
+        setUser={setUser}
+      />
+    );
   }
 
-  // ⏳ Prevent render before page is set
   if (!page) {
     return null;
   }
 
-  // ================= ADMIN VIEW =================
-  if (user.role === "admin") {
+  // ============================================================
+  // ADMIN
+  // ============================================================
+
+  if (
+    user.role === "admin"
+  ) {
     return (
-      <AdminLayout setPage={setPage} logout={handleLogout}>
+      <AdminLayout
+        setPage={setPage}
+        logout={handleLogout}
+      >
+        {page ===
+          "admin-dashboard" && (
+          <AdminDashboard />
+        )}
 
-        {page === "admin-dashboard" && <AdminDashboard />}
+        {page ===
+          "org-create" && (
+          <CreateOrganization />
+        )}
 
-        {page === "org-create" && <CreateOrganization />}
-        {page === "org-deactivate" && <DeactivateOrganization />}
+        {page ===
+          "org-deactivate" && (
+          <DeactivateOrganization />
+        )}
 
-        {page === "user-create" && <CreateUser />}
-        {page === "user-deactivate" && <DeactivateUser />}
+        {page ===
+          "user-create" && (
+          <CreateUser />
+        )}
 
-        {page === "region-create" && <CreateRegion />}
-        {page === "region-management" && <RegionManagement />}
-        {page === "region-upload-crop-details" && <UploadCropDetails />}
-        {page === "region-disable-monitoring" && <DisableMonitoring />}
+        {page ===
+          "user-deactivate" && (
+          <DeactivateUser />
+        )}
 
+        {/* CREATE REGION */}
+
+        {page ===
+          "region-create" && (
+          <CreateRegion
+            onGoToCropDetails={
+              handleRegionCreated
+            }
+          />
+        )}
+
+        {/* VIEW REGIONS */}
+
+        {page ===
+          "region-management" && (
+          <RegionManagement />
+        )}
+
+        {/* STAGE 2 */}
+
+        {page ===
+          "region-upload-crop-details" && (
+          <UploadCropDetails
+            onComplete={
+              handleCropMappingComplete
+            }
+          />
+        )}
+
+        {page ===
+          "region-disable-monitoring" && (
+          <DisableMonitoring />
+        )}
       </AdminLayout>
     );
   }
 
-  // ================= USER VIEW =================
+  // ============================================================
+  // NORMAL USER
+  // ============================================================
+
   return (
-    <Layout setPage={setPage} logout={handleLogout} user={user}>
+    <Layout
+      setPage={setPage}
+      logout={handleLogout}
+      user={user}
+    >
+      {page ===
+        "dashboard" && (
+        <Dashboard />
+      )}
 
-      {page === "dashboard" && <Dashboard />}
-      {page === "soil" && <SoilHealth />}
-      {page === "crop" && <CropHealth />}
-      {page === "rec" && <Recommendations />}
+      {page ===
+        "soil" && (
+        <SoilHealth />
+      )}
 
-      {page === "rec-input" &&
-        ["scientist", "admin"].includes(user.role) && (
+      {page ===
+        "crop" && (
+        <CropHealth />
+      )}
+
+      {page ===
+        "rec" && (
+        <Recommendations />
+      )}
+
+      {page ===
+        "rec-input" &&
+        [
+          "scientist",
+          "admin",
+        ].includes(
+          user.role
+        ) && (
           <AddRecommendation />
         )}
-
     </Layout>
   );
 }

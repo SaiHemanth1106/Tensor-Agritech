@@ -1,6 +1,10 @@
-﻿import { useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
-
+import {
+  useEffect,
+  useState,
+} from "react";
+import type {
+  ChangeEvent,
+} from "react";
 import {
   Alert,
   Box,
@@ -20,27 +24,27 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-
-import { createRegion, getOrganizations } from "../../services/api";
-
+import * as toGeoJSON from "@tmcw/togeojson";
+import {
+  createRegion,
+  getOrganizations,
+} from "../../services/api";
 // ============================================================
 // TYPES
 // ============================================================
-
 interface Organization {
   id: number;
   name: string;
 }
-
 interface CreateRegionResponse {
   success?: boolean;
   message?: string;
-
   region?: {
-    region_id?: number | string;
+    region_id?:
+      | number
+      | string;
     name?: string;
   };
-
   kml?: {
     bucket?: string;
     s3_key?: string;
@@ -48,406 +52,615 @@ interface CreateRegionResponse {
     file_name?: string;
     file_size?: number;
   };
-
   fields?: {
     count?: number;
   };
 }
-
-// ============================================================
-// INITIAL FORM
-// ============================================================
-
+interface CreateRegionProps {
+  onGoToCropDetails: (
+    regionId:
+      | number
+      | string,
+    regionName: string
+  ) => void;
+}
 const initialForm = {
   organizationId: "",
   name: "",
   description: "",
   area: "",
 };
-
+// ============================================================
+// BASE64
+// ============================================================
+const fileToBase64 = (
+  file: File
+): Promise<string> => {
+  return new Promise(
+    (resolve, reject) => {
+      const reader =
+        new FileReader();
+      reader.onload = () => {
+        const result =
+          reader.result;
+        if (
+          typeof result !==
+          "string"
+        ) {
+          reject(
+            new Error(
+              "Unable to read KML file."
+            )
+          );
+          return;
+        }
+        const base64 =
+          result.includes(",")
+            ? result.split(",")[1]
+            : result;
+        if (!base64) {
+          reject(
+            new Error(
+              "Unable to read KML file."
+            )
+          );
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror =
+        () =>
+          reject(
+            new Error(
+              "Unable to read KML file."
+            )
+          );
+      reader.readAsDataURL(
+        file
+      );
+    }
+  );
+};
 // ============================================================
 // COMPONENT
 // ============================================================
-
-export default function CreateRegion() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-
-  const [form, setForm] = useState(initialForm);
-
-  // Base64 KML
-  const [kmlFile, setKmlFile] = useState<string | null>(null);
-
-  // Original file name
-  const [fileName, setFileName] = useState("");
-
-  const [loadingOrganizations, setLoadingOrganizations] =
+export default function CreateRegion({
+  onGoToCropDetails,
+}: CreateRegionProps) {
+  const [
+    organizations,
+    setOrganizations,
+  ] =
+    useState<
+      Organization[]
+    >([]);
+  const [
+    form,
+    setForm,
+  ] =
+    useState(
+      initialForm
+    );
+  const [
+    kmlFile,
+    setKmlFile,
+  ] =
+    useState<
+      string | null
+    >(null);
+  const [
+    fileName,
+    setFileName,
+  ] =
+    useState("");
+  // Local GeoJSON copy only for Stage 2 map.
+  // Backend API stays unchanged.
+  const [
+    geometry,
+    setGeometry,
+  ] =
+    useState("");
+  const [
+    loadingOrganizations,
+    setLoadingOrganizations,
+  ] =
     useState(true);
-
-  const [submitting, setSubmitting] = useState(false);
-
-  const [uploadStatus, setUploadStatus] = useState("");
-
-  const [message, setMessage] = useState("");
-
-  const [error, setError] = useState("");
-
-  const [completionOpen, setCompletionOpen] = useState(false);
-
-  const [progress, setProgress] = useState(0);
-
-  const [processStatus, setProcessStatus] = useState<
-    "pending" | "running" | "success" | "error"
-  >("pending");
-
-  const [processDetail, setProcessDetail] = useState(
-    "Not started"
-  );
-
-  const [notification, setNotification] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
-    open: false,
-    message: "",
-    severity: "success",
-  });
-
+  const [
+    submitting,
+    setSubmitting,
+  ] =
+    useState(false);
+  const [
+    uploadStatus,
+    setUploadStatus,
+  ] =
+    useState("");
+  const [
+    message,
+    setMessage,
+  ] =
+    useState("");
+  const [
+    error,
+    setError,
+  ] =
+    useState("");
+  const [
+    completionOpen,
+    setCompletionOpen,
+  ] =
+    useState(false);
+  const [
+    progress,
+    setProgress,
+  ] =
+    useState(0);
+  const [
+    processStatus,
+    setProcessStatus,
+  ] =
+    useState<
+      | "pending"
+      | "running"
+      | "success"
+      | "error"
+    >("pending");
+  const [
+    processDetail,
+    setProcessDetail,
+  ] =
+    useState(
+      "Not started"
+    );
+  // Save the region returned by AWS.
+  // Used when user clicks CLOSE.
+  const [
+    createdRegion,
+    setCreatedRegion,
+  ] =
+    useState<{
+      id:
+        | string
+        | number;
+      name: string;
+    } | null>(null);
+  const [
+    notification,
+    setNotification,
+  ] =
+    useState<{
+      open: boolean;
+      message: string;
+      severity:
+        | "success"
+        | "error";
+    }>({
+      open: false,
+      message: "",
+      severity:
+        "success",
+    });
   // ============================================================
-  // LOAD ORGANIZATIONS
+  // ORGANIZATIONS
   // ============================================================
-
   useEffect(() => {
-    const loadOrganizations = async () => {
-      try {
-        const result = await getOrganizations();
-
-        setOrganizations(result);
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load organizations."
-        );
-      } finally {
-        setLoadingOrganizations(false);
-      }
-    };
-
+    const loadOrganizations =
+      async () => {
+        try {
+          const result =
+            await getOrganizations();
+          setOrganizations(
+            result
+          );
+        } catch (
+          loadError
+        ) {
+          setError(
+            loadError instanceof
+              Error
+              ? loadError.message
+              : "Failed to load organizations."
+          );
+        } finally {
+          setLoadingOrganizations(
+            false
+          );
+        }
+      };
     void loadOrganizations();
   }, []);
-
-  // ============================================================
-  // UPDATE FORM
-  // ============================================================
-
   const updateField = (
-    field: keyof typeof form,
+    field:
+      keyof typeof form,
     value: string
   ) => {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+    setForm(
+      (current) => ({
+        ...current,
+        [field]:
+          value,
+      })
+    );
   };
-
-  // ============================================================
-  // NOTIFICATION
-  // ============================================================
-
   const showNotification = (
-    severity: "success" | "error",
-    notificationMessage: string
+    severity:
+      | "success"
+      | "error",
+    text: string
   ) => {
     setNotification({
       open: true,
       severity,
-      message: notificationMessage,
+      message: text,
     });
   };
-
   // ============================================================
   // KML FILE
   // ============================================================
-
-  const handleFile = (
-    event: ChangeEvent<HTMLInputElement>
+  const handleFile = async (
+    event:
+      ChangeEvent<HTMLInputElement>
   ) => {
-    const selectedFile = event.target.files?.[0];
-
+    const selectedFile =
+      event.target
+        .files?.[0];
     if (!selectedFile) {
       return;
     }
-
     setError("");
     setMessage("");
     setUploadStatus("");
     setKmlFile(null);
     setFileName("");
-
-    // ----------------------------------------------------------
-    // Validate extension
-    // ----------------------------------------------------------
-
+    setGeometry("");
     if (
       !selectedFile.name
         .toLowerCase()
         .endsWith(".kml")
     ) {
-      setError("Please select a valid KML file.");
+      setError(
+        "Please select a valid KML file."
+      );
       return;
     }
-
-    // ----------------------------------------------------------
-    // Read file as Base64
-    // ----------------------------------------------------------
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      try {
-        const result = reader.result as string;
-
-        const base64Content = result.includes(",")
-          ? result.split(",")[1]
-          : result;
-
-        if (!base64Content) {
-          throw new Error(
-            "Unable to read KML file."
-          );
-        }
-
-        setKmlFile(base64Content);
-
-        setFileName(selectedFile.name);
-
-        setUploadStatus(
-          "KML file is ready to upload."
+    try {
+      // --------------------------------------------------------
+      // SAME BASE64 USED BY WORKING AWS FLOW
+      // --------------------------------------------------------
+      const base64 =
+        await fileToBase64(
+          selectedFile
         );
-      } catch {
-        setKmlFile(null);
-        setFileName("");
-
-        setError(
-          "Unable to read the selected KML file."
+      // --------------------------------------------------------
+      // LOCAL GEOMETRY COPY FOR STAGE 2 MAP
+      // --------------------------------------------------------
+      const kmlText =
+        await selectedFile.text();
+      const xml =
+        new DOMParser()
+          .parseFromString(
+            kmlText,
+            "application/xml"
+          );
+      if (
+        xml.querySelector(
+          "parsererror"
+        )
+      ) {
+        throw new Error(
+          "Invalid KML XML."
         );
       }
-    };
-
-    reader.onerror = () => {
+      const geoJson =
+        toGeoJSON.kml(xml);
+      if (
+        !geoJson.features ||
+        geoJson.features
+          .length === 0
+      ) {
+        throw new Error(
+          "No field geometry found in the KML."
+        );
+      }
+      setKmlFile(
+        base64
+      );
+      setFileName(
+        selectedFile.name
+      );
+      setGeometry(
+        JSON.stringify(
+          geoJson
+        )
+      );
+      setUploadStatus(
+        `KML ready. ${geoJson.features.length} field geometry feature(s) detected.`
+      );
+    } catch (
+      fileError
+    ) {
+      console.error(
+        fileError
+      );
       setKmlFile(null);
       setFileName("");
-
+      setGeometry("");
       setError(
-        "Unable to read the selected KML file."
+        fileError instanceof
+          Error
+          ? fileError.message
+          : "Unable to read KML file."
       );
-    };
-
-    reader.readAsDataURL(selectedFile);
+    }
   };
-
   // ============================================================
   // CREATE REGION
   // ============================================================
-
-  const handleSubmit = async () => {
-    setMessage("");
-    setError("");
+  const handleSubmit =
+    async () => {
+      setMessage("");
+      setError("");
+      setCompletionOpen(
+        false
+      );
+      setCreatedRegion(
+        null
+      );
+      // --------------------------------------------------------
+      // VALIDATION
+      // --------------------------------------------------------
+      if (
+        Object.values(
+          form
+        ).some(
+          (value) =>
+            !String(
+              value
+            ).trim()
+        )
+      ) {
+        const text =
+          "All region details are required.";
+        setError(text);
+        showNotification(
+          "error",
+          text
+        );
+        return;
+      }
+      if (
+        !kmlFile ||
+        !geometry
+      ) {
+        const text =
+          "Please select a valid KML file.";
+        setError(text);
+        showNotification(
+          "error",
+          text
+        );
+        return;
+      }
+      const regionArea =
+        Number(
+          form.area
+        );
+      if (
+        !Number.isFinite(
+          regionArea
+        ) ||
+        regionArea <= 0
+      ) {
+        const text =
+          "Region area must be a number greater than zero.";
+        setError(text);
+        showNotification(
+          "error",
+          text
+        );
+        return;
+      }
+      try {
+        setSubmitting(
+          true
+        );
+        setProgress(
+          25
+        );
+        setProcessStatus(
+          "running"
+        );
+        setProcessDetail(
+          "Sending region and KML to AWS..."
+        );
+        setUploadStatus(
+          "Creating region and processing KML..."
+        );
+        // ======================================================
+        // IMPORTANT
+        // SAME WORKING API CALL
+        // DO NOT CHANGE THIS PAYLOAD
+        // ======================================================
+        const result =
+          (await createRegion({
+            organization_id:
+              Number(
+                form.organizationId
+              ),
+            name:
+              form.name.trim(),
+            description:
+              form.description.trim(),
+            region_area:
+              regionArea,
+            kml_file_name:
+              fileName,
+            kml_file_content:
+              kmlFile,
+          })) as CreateRegionResponse;
+        // ======================================================
+        // SUCCESS
+        // ======================================================
+        if (result?.success === false) {
+          throw new Error(result.message || "Region creation failed.");
+        }
+        const regionId =
+          result?.region
+            ?.region_id;
+        if (
+          regionId ===
+            undefined ||
+          regionId ===
+            null
+        ) {
+          throw new Error(
+            "Region was created but region_id was not returned."
+          );
+        }
+        const regionName =
+          result?.region
+            ?.name ||
+          form.name.trim();
+        const fieldCount =
+          result?.fields
+            ?.count ?? 0;
+        setCreatedRegion({
+          id: regionId,
+          name:
+            regionName,
+        });
+        // ------------------------------------------------------
+        // Store selected region for Stage 2
+        // ------------------------------------------------------
+        try {
+        localStorage.setItem(
+          "pendingCropRegion",
+          JSON.stringify({
+            regionId:
+              String(
+                regionId
+              ),
+            regionName,
+          })
+        );
+        } catch (storageError) {
+          console.warn("Unable to remember selected region:", storageError);
+        }
+        // ------------------------------------------------------
+        // Store KML geometry for Stage 2 map.
+        // Database remains AWS responsibility.
+        // ------------------------------------------------------
+        try {
+          localStorage.setItem(
+            `regionGeometry:${regionId}`,
+            geometry
+          );
+        } catch (
+          storageError
+        ) {
+          console.warn(
+            "Unable to store local geometry:",
+            storageError
+          );
+        }
+        setProgress(
+          100
+        );
+        setProcessStatus(
+          "success"
+        );
+        const detail =
+          `Region ID ${regionId} created successfully. ` +
+          `${fieldCount} field geometry record(s) imported.`;
+        setProcessDetail(
+          detail
+        );
+        setMessage(
+          "Region and KML processed successfully."
+        );
+        setUploadStatus(
+          "Region creation and KML processing completed."
+        );
+        showNotification(
+          "success",
+          detail
+        );
+        setCompletionOpen(
+          true
+        );
+        // Form can now reset.
+        // createdRegion and localStorage remain.
+        setForm(
+          initialForm
+        );
+        setKmlFile(null);
+        setFileName("");
+        setGeometry("");
+      } catch (
+        submitError:
+          unknown
+      ) {
+        setProgress(
+          75
+        );
+        setProcessStatus(
+          "error"
+        );
+        const detail =
+          submitError instanceof
+            Error
+            ? submitError.message
+            : typeof submitError ===
+                  "object" &&
+                submitError &&
+                "message" in
+                  submitError
+              ? String(
+                  (
+                    submitError as {
+                      message?: unknown;
+                    }
+                  ).message
+                )
+              : "Failed to create region.";
+        setProcessDetail(
+          detail
+        );
+        setError(
+          detail
+        );
+        setUploadStatus(
+          ""
+        );
+        showNotification(
+          "error",
+          detail
+        );
+        setCompletionOpen(
+          true
+        );
+      } finally {
+        setSubmitting(
+          false
+        );
+      }
+    };
+  // ============================================================
+  // POPUP CLOSE
+  //
+  // Close dismisses; Upload Crop Details navigates explicitly.
+  // ============================================================
+  const handleCompletionClose = () => {
     setCompletionOpen(false);
-
-    // ----------------------------------------------------------
-    // VALIDATE FORM
-    // ----------------------------------------------------------
-
-    if (
-      Object.values(form).some(
-        (value) => !String(value).trim()
-      )
-    ) {
-      const validationError =
-        "All region details are required.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // VALIDATE KML
-    // ----------------------------------------------------------
-
-    if (!kmlFile) {
-      const validationError =
-        "Please select a KML file.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // VALIDATE AREA
-    // ----------------------------------------------------------
-
-    const regionArea = Number(form.area);
-
-    if (
-      !Number.isFinite(regionArea) ||
-      regionArea <= 0
-    ) {
-      const validationError =
-        "Region area must be a number greater than zero.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ==========================================================
-    // START PROCESS
-    // ==========================================================
-
-    try {
-      setSubmitting(true);
-
-      setProgress(25);
-
-      setProcessStatus("running");
-
-      setProcessDetail(
-        "Sending region and KML to AWS..."
-      );
-
-      setUploadStatus(
-        "Creating region and processing KML..."
-      );
-
-      // ========================================================
-      // SINGLE API CALL
-      // ========================================================
-
-      const result =
-        (await createRegion({
-          organization_id:
-            Number(form.organizationId),
-
-          name: form.name.trim(),
-
-          description:
-            form.description.trim(),
-
-          region_area: regionArea,
-
-          kml_file_name: fileName,
-
-          kml_file_content: kmlFile,
-        })) as CreateRegionResponse;
-
-      // ========================================================
-      // SUCCESS
-      // ========================================================
-
-      setProgress(100);
-
-      setProcessStatus("success");
-
-      const regionId =
-        result?.region?.region_id;
-
-      const fieldCount =
-        result?.fields?.count ?? 0;
-
-      const successDetail = regionId
-        ? `Region ID ${regionId} created successfully. ${fieldCount} field geometry record(s) imported.`
-        : `Region created successfully. ${fieldCount} field geometry record(s) imported.`;
-
-      setProcessDetail(successDetail);
-
-      setMessage(
-        "Region and KML processed successfully."
-      );
-
-      setUploadStatus(
-        "Region creation and KML processing completed."
-      );
-
-      showNotification(
-        "success",
-        successDetail
-      );
-
-      setCompletionOpen(true);
-
-      // --------------------------------------------------------
-      // Reset form
-      // --------------------------------------------------------
-
-      setForm(initialForm);
-
-      setKmlFile(null);
-
-      setFileName("");
-    } catch (submitError: unknown) {
-      // ========================================================
-      // ERROR
-      // ========================================================
-
-      setProgress(75);
-
-      setProcessStatus("error");
-
-      const detail =
-        submitError instanceof Error
-          ? submitError.message
-          : typeof submitError === "object" &&
-              submitError &&
-              "message" in submitError
-            ? String(
-                (
-                  submitError as {
-                    message?: unknown;
-                  }
-                ).message
-              )
-            : "Failed to create region.";
-
-      setProcessDetail(detail);
-
-      setError(detail);
-
-      setUploadStatus("");
-
-      showNotification(
-        "error",
-        detail
-      );
-
-      setCompletionOpen(true);
-    } finally {
-      setSubmitting(false);
-    }
   };
-
+  const handleUploadCropDetails = () => {
+    if (processStatus !== "success" || !createdRegion) return;
+    setCompletionOpen(false);
+    onGoToCropDetails(createdRegion.id, createdRegion.name);
+  };
   // ============================================================
   // UI
   // ============================================================
-
   return (
     <Box
       maxWidth={650}
@@ -467,9 +680,6 @@ export default function CreateRegion() {
         >
           📍 Create Region
         </Typography>
-
-        {/* ERROR */}
-
         {error && (
           <Alert
             severity="error"
@@ -478,9 +688,6 @@ export default function CreateRegion() {
             {error}
           </Alert>
         )}
-
-        {/* SUCCESS */}
-
         {message && (
           <Alert
             severity="success"
@@ -489,9 +696,6 @@ export default function CreateRegion() {
             {message}
           </Alert>
         )}
-
-        {/* ORGANIZATION */}
-
         <FormControl
           fullWidth
           required
@@ -504,93 +708,118 @@ export default function CreateRegion() {
           <InputLabel>
             Organisation ID
           </InputLabel>
-
           <Select
-            value={form.organizationId}
+            value={
+              form.organizationId
+            }
             label="Organisation ID"
-            onChange={(event) =>
+            onChange={(
+              event
+            ) =>
               updateField(
                 "organizationId",
-                event.target.value
+                String(
+                  event.target
+                    .value
+                )
               )
             }
           >
             {organizations.map(
-              (organization) => (
+              (
+                organization
+              ) => (
                 <MenuItem
-                  key={organization.id}
-                  value={organization.id}
+                  key={
+                    organization.id
+                  }
+                  value={
+                    organization.id
+                  }
                 >
-                  {organization.id} —{" "}
-                  {organization.name}
+                  {
+                    organization.id
+                  }{" "}
+                  —{" "}
+                  {
+                    organization.name
+                  }
                 </MenuItem>
               )
             )}
           </Select>
         </FormControl>
-
-        {/* REGION NAME */}
-
         <TextField
           label="Region Name"
           fullWidth
           required
-          disabled={submitting}
+          disabled={
+            submitting
+          }
           sx={{ mb: 2 }}
-          value={form.name}
-          onChange={(event) =>
+          value={
+            form.name
+          }
+          onChange={(
+            event
+          ) =>
             updateField(
               "name",
               event.target.value
             )
           }
         />
-
-        {/* DESCRIPTION */}
-
         <TextField
           label="Description"
           fullWidth
           required
           multiline
           rows={3}
-          disabled={submitting}
+          disabled={
+            submitting
+          }
           sx={{ mb: 2 }}
-          value={form.description}
-          onChange={(event) =>
+          value={
+            form.description
+          }
+          onChange={(
+            event
+          ) =>
             updateField(
               "description",
               event.target.value
             )
           }
         />
-
-        {/* AREA */}
-
         <TextField
           label="Region Area"
           fullWidth
           required
           type="number"
-          disabled={submitting}
+          disabled={
+            submitting
+          }
           inputProps={{
             min: 0,
             step: "any",
           }}
           helperText="Enter the area in the unit required by the backend."
           sx={{ mb: 3 }}
-          value={form.area}
-          onChange={(event) =>
+          value={
+            form.area
+          }
+          onChange={(
+            event
+          ) =>
             updateField(
               "area",
               event.target.value
             )
           }
         />
-
-        {/* KML */}
-
-        <Box sx={{ mb: 2 }}>
+        <Box
+          sx={{ mb: 2 }}
+        >
           <Typography
             variant="subtitle1"
             fontWeight="medium"
@@ -598,38 +827,40 @@ export default function CreateRegion() {
           >
             Region KML *
           </Typography>
-
           <Button
             component="label"
             variant="outlined"
             fullWidth
-            disabled={submitting}
+            disabled={
+              submitting
+            }
           >
             Upload KML
-
             <input
               hidden
               required
               type="file"
               accept=".kml,application/vnd.google-earth.kml+xml"
-              onChange={handleFile}
+              onChange={
+                handleFile
+              }
             />
           </Button>
-
           {fileName && (
             <Typography
               variant="body2"
               sx={{ mt: 1 }}
             >
-              Selected file: {fileName}
+              Selected file:{" "}
+              {fileName}
             </Typography>
           )}
         </Box>
-
-        {/* PROCESS STATUS */}
-
-        {processStatus !== "pending" && (
-          <Box sx={{ mb: 2 }}>
+        {processStatus !==
+          "pending" && (
+          <Box
+            sx={{ mb: 2 }}
+          >
             <Box
               display="flex"
               justifyContent="space-between"
@@ -641,7 +872,6 @@ export default function CreateRegion() {
               >
                 Region processing
               </Typography>
-
               <Typography
                 variant="body2"
                 color="text.secondary"
@@ -649,12 +879,14 @@ export default function CreateRegion() {
                 {progress}%
               </Typography>
             </Box>
-
             <LinearProgress
               variant="determinate"
-              value={progress}
+              value={
+                progress
+              }
               color={
-                processStatus === "error"
+                processStatus ===
+                "error"
                   ? "error"
                   : "primary"
               }
@@ -664,34 +896,33 @@ export default function CreateRegion() {
                 mb: 1,
               }}
             />
-
             <Typography
               variant="caption"
               color="text.secondary"
               display="block"
             >
-              {processDetail}
+              {
+                processDetail
+              }
             </Typography>
           </Box>
         )}
-
-        {/* STATUS */}
-
         {uploadStatus && (
           <Alert
             severity="info"
             sx={{ mb: 2 }}
           >
-            {uploadStatus}
+            {
+              uploadStatus
+            }
           </Alert>
         )}
-
-        {/* CREATE BUTTON */}
-
         <Button
           variant="contained"
           fullWidth
-          onClick={handleSubmit}
+          onClick={
+            handleSubmit
+          }
           disabled={
             submitting ||
             loadingOrganizations
@@ -707,56 +938,68 @@ export default function CreateRegion() {
           )}
         </Button>
       </Paper>
-
-      {/* COMPLETION DIALOG */}
-
+      {/* SUCCESS / ERROR POPUP */}
       <Dialog
-        open={completionOpen}
-        onClose={() =>
-          setCompletionOpen(false)
+        open={
+          completionOpen
+        }
+        onClose={
+          handleCompletionClose
         }
         fullWidth
         maxWidth="sm"
       >
         <DialogTitle>
-          {processStatus === "success"
+          {processStatus ===
+          "success"
             ? "Region Process Completed"
             : "Region Process Failed"}
         </DialogTitle>
-
         <DialogContent>
           <Alert
             severity={
-              processStatus === "success"
+              processStatus ===
+              "success"
                 ? "success"
                 : "error"
             }
           >
-            <Typography fontWeight="bold">
-              uploadRegion Lambda:{" "}
-              {processStatus}
+            <Typography
+              fontWeight="bold"
+            >
+              uploadRegion
+              Lambda:{" "}
+              {
+                processStatus
+              }
             </Typography>
-
-            {processDetail}
+            {
+              processDetail
+            }
           </Alert>
         </DialogContent>
-
         <DialogActions>
           <Button
-            onClick={() =>
-              setCompletionOpen(false)
+            onClick={
+              handleCompletionClose
             }
           >
-            Close
+            CLOSE
           </Button>
+          {processStatus === "success" && createdRegion && (
+            <Button variant="contained" onClick={handleUploadCropDetails}>
+              Upload Crop Details
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
-
-      {/* SNACKBAR */}
-
       <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
+        open={
+          notification.open
+        }
+        autoHideDuration={
+          6000
+        }
         onClose={() =>
           setNotification(
             (current) => ({
@@ -767,7 +1010,9 @@ export default function CreateRegion() {
         }
       >
         <Alert
-          severity={notification.severity}
+          severity={
+            notification.severity
+          }
           variant="filled"
           onClose={() =>
             setNotification(
@@ -778,7 +1023,9 @@ export default function CreateRegion() {
             )
           }
         >
-          {notification.message}
+          {
+            notification.message
+          }
         </Alert>
       </Snackbar>
     </Box>
