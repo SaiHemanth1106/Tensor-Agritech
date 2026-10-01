@@ -91,18 +91,17 @@ export const getRegions = () =>
 
 export interface CreateRegionPayload {
   organization_id: number;
+  country: string;
+  state: string;
   name: string;
   description: string;
-  region_area: number;
-  kml_file_name: string;
-  kml_file_content: string;
 }
 
 export const createRegion = (
   data: CreateRegionPayload
 ) =>
   handle(
-    api.post("/region/upload", data)
+    api.post("/regions", data)
   );
 // ==============================
 // 🌱 SOIL

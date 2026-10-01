@@ -1,18 +1,12 @@
 ﻿import { useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
 
 import {
   Alert,
   Box,
   Button,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControl,
   InputLabel,
-  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -23,94 +17,37 @@ import {
 
 import { createRegion, getOrganizations } from "../../services/api";
 
-// ============================================================
-// TYPES
-// ============================================================
-
 interface Organization {
   id: number;
   name: string;
 }
 
-interface CreateRegionResponse {
-  success?: boolean;
-  message?: string;
-
-  region?: {
-    region_id?: number | string;
-    name?: string;
-  };
-
-  kml?: {
-    bucket?: string;
-    s3_key?: string;
-    s3_uri?: string;
-    file_name?: string;
-    file_size?: number;
-  };
-
-  fields?: {
-    count?: number;
-  };
-}
-
-// ============================================================
-// INITIAL FORM
-// ============================================================
-
 const initialForm = {
   organizationId: "",
+  country: "",
+  state: "",
   name: "",
   description: "",
-  area: "",
 };
-
-// ============================================================
-// COMPONENT
-// ============================================================
 
 export default function CreateRegion() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   const [form, setForm] = useState(initialForm);
 
-  // Base64 KML
-  const [kmlFile, setKmlFile] = useState<string | null>(null);
-
-  // Original file name
-  const [fileName, setFileName] = useState("");
-
   const [loadingOrganizations, setLoadingOrganizations] =
     useState(true);
 
   const [submitting, setSubmitting] = useState(false);
 
-  const [uploadStatus, setUploadStatus] = useState("");
+  const [error, setError] = useState("");
 
   const [message, setMessage] = useState("");
 
-  const [error, setError] = useState("");
-
-  const [completionOpen, setCompletionOpen] = useState(false);
-
-  const [progress, setProgress] = useState(0);
-
-  const [processStatus, setProcessStatus] = useState<
-    "pending" | "running" | "success" | "error"
-  >("pending");
-
-  const [processDetail, setProcessDetail] = useState(
-    "Not started"
-  );
-
-  const [notification, setNotification] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
+  const [notification, setNotification] = useState({
     open: false,
     message: "",
-    severity: "success",
+    severity: "success" as "success" | "error",
   });
 
   // ============================================================
@@ -123,10 +60,10 @@ export default function CreateRegion() {
         const result = await getOrganizations();
 
         setOrganizations(result);
-      } catch (loadError) {
+      } catch (err) {
         setError(
-          loadError instanceof Error
-            ? loadError.message
+          err instanceof Error
+            ? err.message
             : "Failed to load organizations."
         );
       } finally {
@@ -157,94 +94,13 @@ export default function CreateRegion() {
 
   const showNotification = (
     severity: "success" | "error",
-    notificationMessage: string
+    message: string
   ) => {
     setNotification({
       open: true,
       severity,
-      message: notificationMessage,
+      message,
     });
-  };
-
-  // ============================================================
-  // KML FILE
-  // ============================================================
-
-  const handleFile = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const selectedFile = event.target.files?.[0];
-
-    if (!selectedFile) {
-      return;
-    }
-
-    setError("");
-    setMessage("");
-    setUploadStatus("");
-    setKmlFile(null);
-    setFileName("");
-
-    // ----------------------------------------------------------
-    // Validate extension
-    // ----------------------------------------------------------
-
-    if (
-      !selectedFile.name
-        .toLowerCase()
-        .endsWith(".kml")
-    ) {
-      setError("Please select a valid KML file.");
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // Read file as Base64
-    // ----------------------------------------------------------
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      try {
-        const result = reader.result as string;
-
-        const base64Content = result.includes(",")
-          ? result.split(",")[1]
-          : result;
-
-        if (!base64Content) {
-          throw new Error(
-            "Unable to read KML file."
-          );
-        }
-
-        setKmlFile(base64Content);
-
-        setFileName(selectedFile.name);
-
-        setUploadStatus(
-          "KML file is ready to upload."
-        );
-      } catch {
-        setKmlFile(null);
-        setFileName("");
-
-        setError(
-          "Unable to read the selected KML file."
-        );
-      }
-    };
-
-    reader.onerror = () => {
-      setKmlFile(null);
-      setFileName("");
-
-      setError(
-        "Unable to read the selected KML file."
-      );
-    };
-
-    reader.readAsDataURL(selectedFile);
   };
 
   // ============================================================
@@ -252,21 +108,18 @@ export default function CreateRegion() {
   // ============================================================
 
   const handleSubmit = async () => {
-    setMessage("");
     setError("");
-    setCompletionOpen(false);
-
-    // ----------------------------------------------------------
-    // VALIDATE FORM
-    // ----------------------------------------------------------
+    setMessage("");
 
     if (
-      Object.values(form).some(
-        (value) => !String(value).trim()
-      )
+      !form.organizationId.trim() ||
+      !form.country.trim() ||
+      !form.state.trim() ||
+      !form.name.trim() ||
+      !form.description.trim()
     ) {
       const validationError =
-        "All region details are required.";
+        "Please fill in all region details.";
 
       setError(validationError);
 
@@ -277,168 +130,47 @@ export default function CreateRegion() {
 
       return;
     }
-
-    // ----------------------------------------------------------
-    // VALIDATE KML
-    // ----------------------------------------------------------
-
-    if (!kmlFile) {
-      const validationError =
-        "Please select a KML file.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // VALIDATE AREA
-    // ----------------------------------------------------------
-
-    const regionArea = Number(form.area);
-
-    if (
-      !Number.isFinite(regionArea) ||
-      regionArea <= 0
-    ) {
-      const validationError =
-        "Region area must be a number greater than zero.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
-      return;
-    }
-
-    // ==========================================================
-    // START PROCESS
-    // ==========================================================
 
     try {
       setSubmitting(true);
 
-      setProgress(25);
-
-      setProcessStatus("running");
-
-      setProcessDetail(
-        "Sending region and KML to AWS..."
-      );
-
-      setUploadStatus(
-        "Creating region and processing KML..."
-      );
-
-      // ========================================================
-      // SINGLE API CALL
-      // ========================================================
-
-      const result =
-        (await createRegion({
-          organization_id:
-            Number(form.organizationId),
-
-          name: form.name.trim(),
-
-          description:
-            form.description.trim(),
-
-          region_area: regionArea,
-
-          kml_file_name: fileName,
-
-          kml_file_content: kmlFile,
-        })) as CreateRegionResponse;
-
-      // ========================================================
-      // SUCCESS
-      // ========================================================
-
-      setProgress(100);
-
-      setProcessStatus("success");
+      const result = await createRegion({
+        organization_id: Number(form.organizationId),
+        country: form.country.trim(),
+        state: form.state.trim(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+      });
 
       const regionId =
-        result?.region?.region_id;
+        result?.region?.region_id ??
+        result?.region_id;
 
-      const fieldCount =
-        result?.fields?.count ?? 0;
+      const successMessage = regionId
+        ? `Region created successfully. Region ID: ${regionId}`
+        : "Region created successfully.";
 
-      const successDetail = regionId
-        ? `Region ID ${regionId} created successfully. ${fieldCount} field geometry record(s) imported.`
-        : `Region created successfully. ${fieldCount} field geometry record(s) imported.`;
-
-      setProcessDetail(successDetail);
-
-      setMessage(
-        "Region and KML processed successfully."
-      );
-
-      setUploadStatus(
-        "Region creation and KML processing completed."
-      );
+      setMessage(successMessage);
 
       showNotification(
         "success",
-        successDetail
+        successMessage
       );
-
-      setCompletionOpen(true);
-
-      // --------------------------------------------------------
-      // Reset form
-      // --------------------------------------------------------
 
       setForm(initialForm);
 
-      setKmlFile(null);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Failed to create region.";
 
-      setFileName("");
-    } catch (submitError: unknown) {
-      // ========================================================
-      // ERROR
-      // ========================================================
-
-      setProgress(75);
-
-      setProcessStatus("error");
-
-      const detail =
-        submitError instanceof Error
-          ? submitError.message
-          : typeof submitError === "object" &&
-              submitError &&
-              "message" in submitError
-            ? String(
-                (
-                  submitError as {
-                    message?: unknown;
-                  }
-                ).message
-              )
-            : "Failed to create region.";
-
-      setProcessDetail(detail);
-
-      setError(detail);
-
-      setUploadStatus("");
+      setError(errorMessage);
 
       showNotification(
         "error",
-        detail
+        errorMessage
       );
-
-      setCompletionOpen(true);
     } finally {
       setSubmitting(false);
     }
@@ -502,12 +234,12 @@ export default function CreateRegion() {
           }
         >
           <InputLabel>
-            Organisation ID
+            Organisation
           </InputLabel>
 
           <Select
             value={form.organizationId}
-            label="Organisation ID"
+            label="Organisation"
             onChange={(event) =>
               updateField(
                 "organizationId",
@@ -515,19 +247,51 @@ export default function CreateRegion() {
               )
             }
           >
-            {organizations.map(
-              (organization) => (
-                <MenuItem
-                  key={organization.id}
-                  value={organization.id}
-                >
-                  {organization.id} —{" "}
-                  {organization.name}
-                </MenuItem>
-              )
-            )}
+            {organizations.map((organization) => (
+              <MenuItem
+                key={organization.id}
+                value={organization.id}
+              >
+                {organization.id} —{" "}
+                {organization.name}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
+
+        {/* COUNTRY */}
+
+        <TextField
+          label="Country"
+          fullWidth
+          required
+          disabled={submitting}
+          sx={{ mb: 2 }}
+          value={form.country}
+          onChange={(event) =>
+            updateField(
+              "country",
+              event.target.value
+            )
+          }
+        />
+
+        {/* STATE */}
+
+        <TextField
+          label="State"
+          fullWidth
+          required
+          disabled={submitting}
+          sx={{ mb: 2 }}
+          value={form.state}
+          onChange={(event) =>
+            updateField(
+              "state",
+              event.target.value
+            )
+          }
+        />
 
         {/* REGION NAME */}
 
@@ -553,9 +317,9 @@ export default function CreateRegion() {
           fullWidth
           required
           multiline
-          rows={3}
+          rows={4}
           disabled={submitting}
-          sx={{ mb: 2 }}
+          sx={{ mb: 3 }}
           value={form.description}
           onChange={(event) =>
             updateField(
@@ -564,127 +328,6 @@ export default function CreateRegion() {
             )
           }
         />
-
-        {/* AREA */}
-
-        <TextField
-          label="Region Area"
-          fullWidth
-          required
-          type="number"
-          disabled={submitting}
-          inputProps={{
-            min: 0,
-            step: "any",
-          }}
-          helperText="Enter the area in the unit required by the backend."
-          sx={{ mb: 3 }}
-          value={form.area}
-          onChange={(event) =>
-            updateField(
-              "area",
-              event.target.value
-            )
-          }
-        />
-
-        {/* KML */}
-
-        <Box sx={{ mb: 2 }}>
-          <Typography
-            variant="subtitle1"
-            fontWeight="medium"
-            mb={1}
-          >
-            Region KML *
-          </Typography>
-
-          <Button
-            component="label"
-            variant="outlined"
-            fullWidth
-            disabled={submitting}
-          >
-            Upload KML
-
-            <input
-              hidden
-              required
-              type="file"
-              accept=".kml,application/vnd.google-earth.kml+xml"
-              onChange={handleFile}
-            />
-          </Button>
-
-          {fileName && (
-            <Typography
-              variant="body2"
-              sx={{ mt: 1 }}
-            >
-              Selected file: {fileName}
-            </Typography>
-          )}
-        </Box>
-
-        {/* PROCESS STATUS */}
-
-        {processStatus !== "pending" && (
-          <Box sx={{ mb: 2 }}>
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              mb={0.75}
-            >
-              <Typography
-                variant="body2"
-                fontWeight="medium"
-              >
-                Region processing
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-              >
-                {progress}%
-              </Typography>
-            </Box>
-
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              color={
-                processStatus === "error"
-                  ? "error"
-                  : "primary"
-              }
-              sx={{
-                height: 8,
-                borderRadius: 1,
-                mb: 1,
-              }}
-            />
-
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-            >
-              {processDetail}
-            </Typography>
-          </Box>
-        )}
-
-        {/* STATUS */}
-
-        {uploadStatus && (
-          <Alert
-            severity="info"
-            sx={{ mb: 2 }}
-          >
-            {uploadStatus}
-          </Alert>
-        )}
 
         {/* CREATE BUTTON */}
 
@@ -708,74 +351,26 @@ export default function CreateRegion() {
         </Button>
       </Paper>
 
-      {/* COMPLETION DIALOG */}
-
-      <Dialog
-        open={completionOpen}
-        onClose={() =>
-          setCompletionOpen(false)
-        }
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>
-          {processStatus === "success"
-            ? "Region Process Completed"
-            : "Region Process Failed"}
-        </DialogTitle>
-
-        <DialogContent>
-          <Alert
-            severity={
-              processStatus === "success"
-                ? "success"
-                : "error"
-            }
-          >
-            <Typography fontWeight="bold">
-              uploadRegion Lambda:{" "}
-              {processStatus}
-            </Typography>
-
-            {processDetail}
-          </Alert>
-        </DialogContent>
-
-        <DialogActions>
-          <Button
-            onClick={() =>
-              setCompletionOpen(false)
-            }
-          >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* SNACKBAR */}
 
       <Snackbar
         open={notification.open}
-        autoHideDuration={6000}
+        autoHideDuration={5000}
         onClose={() =>
-          setNotification(
-            (current) => ({
-              ...current,
-              open: false,
-            })
-          )
+          setNotification((current) => ({
+            ...current,
+            open: false,
+          }))
         }
       >
         <Alert
           severity={notification.severity}
           variant="filled"
           onClose={() =>
-            setNotification(
-              (current) => ({
-                ...current,
-                open: false,
-              })
-            )
+            setNotification((current) => ({
+              ...current,
+              open: false,
+            }))
           }
         >
           {notification.message}
