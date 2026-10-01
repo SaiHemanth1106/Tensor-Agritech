@@ -26,64 +26,219 @@ import {
   Typography,
 } from "@mui/material";
 
-import * as toGeoJSON from "@tmcw/togeojson";
-
 import {
-  getOrganizations,
-} from "../../services/api";
+  getRegions,
+  uploadRegionKml,
+} from "../../services/regionApi";
 
+type Region = Record<string, any>;
 
-// ============================================================
-// TYPES
-// ============================================================
+interface CreateFieldProps {
+  onGoToCropDetails?: (
+    regionId: string,
+    regionName: string
+  ) => void;
 
-interface Organization {
-  id: number;
-  name: string;
+  onNavigate?: (
+    page: string
+  ) => void;
 }
 
-interface RegionInfo {
+interface StoredRegion {
   regionId: string;
   organizationId: string;
   country: string;
   state: string;
-  name: string;
+  regionName: string;
   description?: string;
 }
 
-interface CreateFieldProps {
-  onGoToCropDetails: (
-    regionId: string | number,
-    regionName: string
-  ) => void;
-}
+const getRegionList = (
+  response: any
+): Region[] => {
+  if (Array.isArray(response)) {
+    return response;
+  }
 
+  if (
+    response &&
+    Array.isArray(response.regions)
+  ) {
+    return response.regions;
+  }
 
-// ============================================================
-// STORAGE KEY
-// ============================================================
+  if (
+    response &&
+    Array.isArray(response.data)
+  ) {
+    return response.data;
+  }
 
-const REGION_STORAGE_KEY =
-  "frontendStaticRegions";
+  return [];
+};
 
+const getRegionId = (
+  region: Region
+) =>
+  String(
+    region?.region_id ??
+      region?.id ??
+      region?.regionId ??
+      ""
+  );
 
-// ============================================================
-// COMPONENT
-// ============================================================
+const getRegionName = (
+  region: Region
+) =>
+  String(
+    region?.name ??
+      region?.region_name ??
+      region?.regionName ??
+      ""
+  );
+
+const getOrganizationId = (
+  region: Region
+) =>
+  String(
+    region?.organization_id ??
+      region?.organizationId ??
+      region?.org_id ??
+      ""
+  );
+
+const getCountry = (
+  region: Region
+) =>
+  String(
+    region?.country ??
+      region?.region_country ??
+      ""
+  );
+
+const getState = (
+  region: Region
+) =>
+  String(
+    region?.state ??
+      region?.region_state ??
+      ""
+  );
+
+const readLastCreatedRegion =
+  (): StoredRegion | null => {
+    try {
+      const value =
+        localStorage.getItem(
+          "lastCreatedRegion"
+        );
+
+      if (!value) {
+        return null;
+      }
+
+      const parsed =
+        JSON.parse(value);
+
+      if (!parsed?.regionId) {
+        return null;
+      }
+
+      return {
+        regionId: String(
+          parsed.regionId
+        ),
+
+        organizationId: String(
+          parsed.organizationId ??
+            ""
+        ),
+
+        country: String(
+          parsed.country ?? ""
+        ),
+
+        state: String(
+          parsed.state ?? ""
+        ),
+
+        regionName: String(
+          parsed.regionName ?? ""
+        ),
+
+        description: String(
+          parsed.description ?? ""
+        ),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+const fileToBase64 = (
+  file: File
+): Promise<string> =>
+  new Promise(
+    (resolve, reject) => {
+      const reader =
+        new FileReader();
+
+      reader.onload = () => {
+        const result =
+          reader.result;
+
+        if (
+          typeof result !==
+          "string"
+        ) {
+          reject(
+            new Error(
+              "Unable to read KML file."
+            )
+          );
+
+          return;
+        }
+
+        const base64 =
+          result.includes(",")
+            ? result.split(",")[1]
+            : result;
+
+        if (!base64) {
+          reject(
+            new Error(
+              "Invalid KML file."
+            )
+          );
+
+          return;
+        }
+
+        resolve(base64);
+      };
+
+      reader.onerror = () =>
+        reject(
+          new Error(
+            "Unable to read KML file."
+          )
+        );
+
+      reader.readAsDataURL(
+        file
+      );
+    }
+  );
 
 export default function CreateField({
   onGoToCropDetails,
+  onNavigate,
 }: CreateFieldProps) {
-
-  const [
-    organizations,
-    setOrganizations,
-  ] = useState<Organization[]>([]);
-
   const [
     regions,
     setRegions,
-  ] = useState<RegionInfo[]>([]);
+  ] = useState<Region[]>([]);
 
   const [
     selectedRegionId,
@@ -91,13 +246,21 @@ export default function CreateField({
   ] = useState("");
 
   const [
-    loadingOrganizations,
-    setLoadingOrganizations,
+    kmlFile,
+    setKmlFile,
+  ] =
+    useState<File | null>(
+      null
+    );
+
+  const [
+    loading,
+    setLoading,
   ] = useState(true);
 
   const [
-    processingKml,
-    setProcessingKml,
+    submitting,
+    setSubmitting,
   ] = useState(false);
 
   const [
@@ -106,883 +269,901 @@ export default function CreateField({
   ] = useState("");
 
   const [
-    successOpen,
-    setSuccessOpen,
-  ] = useState(false);
-
-  const [
-    kmlFileName,
-    setKmlFileName,
+    success,
+    setSuccess,
   ] = useState("");
 
   const [
-    fieldCount,
-    setFieldCount,
+    storedRegion,
+    setStoredRegion,
+  ] =
+    useState<StoredRegion | null>(
+      null
+    );
+
+  const [
+    completionOpen,
+    setCompletionOpen,
+  ] = useState(false);
+
+  const [
+    lambdaStatus,
+    setLambdaStatus,
+  ] = useState<
+    "success" | "error"
+  >("success");
+
+  const [
+    lambdaDetail,
+    setLambdaDetail,
+  ] = useState("");
+
+  const [
+    createdFieldCount,
+    setCreatedFieldCount,
   ] = useState(0);
 
-
-  // ============================================================
-  // LOAD ORGANIZATIONS
-  // ============================================================
-
   useEffect(() => {
-
-    const loadOrganizations =
+    const loadRegions =
       async () => {
-
         try {
+          setLoading(true);
+          setError("");
 
-          const result =
-            await getOrganizations();
+          const lastRegion =
+            readLastCreatedRegion();
 
-          if (
-            Array.isArray(result)
-          ) {
-            setOrganizations(
-              result
+          setStoredRegion(
+            lastRegion
+          );
+
+          const response =
+            await getRegions();
+
+          const apiRegions =
+            getRegionList(
+              response
             );
-          } else if (
-            Array.isArray(
-              (result as any)
-                ?.organizations
-            )
-          ) {
-            setOrganizations(
-              (result as any)
-                .organizations
-            );
-          } else if (
-            Array.isArray(
-              (result as any)
-                ?.data
-            )
-          ) {
-            setOrganizations(
-              (result as any)
-                .data
-            );
-          } else {
-            setOrganizations([]);
+
+          let nextRegions =
+            [...apiRegions];
+
+          if (lastRegion) {
+            const exists =
+              nextRegions.some(
+                (region) =>
+                  getRegionId(
+                    region
+                  ) ===
+                  lastRegion.regionId
+              );
+
+            if (!exists) {
+              nextRegions = [
+                {
+                  id:
+                    lastRegion.regionId,
+
+                  region_id:
+                    lastRegion.regionId,
+
+                  organization_id:
+                    lastRegion.organizationId,
+
+                  country:
+                    lastRegion.country,
+
+                  state:
+                    lastRegion.state,
+
+                  name:
+                    lastRegion.regionName,
+
+                  description:
+                    lastRegion.description,
+                },
+
+                ...nextRegions,
+              ];
+            }
           }
 
-        } catch (
-          loadError
-        ) {
-
-          console.error(
-            "Unable to load organizations:",
-            loadError
+          setRegions(
+            nextRegions
           );
 
-        } finally {
-
-          setLoadingOrganizations(
-            false
-          );
-
-        }
-
-      };
-
-    void loadOrganizations();
-
-  }, []);
-
-
-  // ============================================================
-  // LOAD REGIONS CREATED IN CREATE REGION
-  // ============================================================
-
-  useEffect(() => {
-
-    try {
-
-      const stored =
-        localStorage.getItem(
-          REGION_STORAGE_KEY
-        );
-
-      if (!stored) {
-
-        setRegions([]);
-
-        setError(
-          "No region found. Please create a region first."
-        );
-
-        return;
-      }
-
-      const parsed =
-        JSON.parse(stored);
-
-      if (
-        !Array.isArray(parsed) ||
-        parsed.length === 0
-      ) {
-
-        setRegions([]);
-
-        setError(
-          "No region found. Please create a region first."
-        );
-
-        return;
-      }
-
-
-      const validRegions:
-        RegionInfo[] =
-        parsed.map(
-          (region: any) => ({
-            regionId:
-              String(
-                region.regionId ??
-                region.region_id ??
-                region.id ??
-                ""
-              ),
-
-            organizationId:
-              String(
-                region.organizationId ??
-                region.organization_id ??
-                ""
-              ),
-
-            country:
-              String(
-                region.country ??
-                ""
-              ),
-
-            state:
-              String(
-                region.state ??
-                ""
-              ),
-
-            name:
-              String(
-                region.name ??
-                region.regionName ??
-                ""
-              ),
-
-            description:
-              String(
-                region.description ??
-                ""
-              ),
-          })
-        );
-
-
-      setRegions(
-        validRegions
-      );
-
-
-      // ========================================================
-      // AUTOMATICALLY SELECT LAST CREATED REGION
-      // ========================================================
-
-      const lastRegion =
-        validRegions[
-          validRegions.length - 1
-        ];
-
-      if (lastRegion) {
-
-        setSelectedRegionId(
-          lastRegion.regionId
-        );
-
-        setError("");
-
-      }
-
-    } catch (
-      storageError
-    ) {
-
-      console.error(
-        storageError
-      );
-
-      setRegions([]);
-
-      setError(
-        "Unable to load created region details."
-      );
-
-    }
-
-  }, []);
-
-
-  // ============================================================
-  // SELECTED REGION
-  // ============================================================
-
-  const selectedRegion =
-    useMemo(() => {
-
-      return (
-        regions.find(
-          (region) =>
-            String(
-              region.regionId
-            ) ===
-            String(
-              selectedRegionId
-            )
-        ) ?? null
-      );
-
-    }, [
-      regions,
-      selectedRegionId,
-    ]);
-
-
-  // ============================================================
-  // ORGANIZATION NAME
-  // ============================================================
-
-  const selectedOrganization =
-    useMemo(() => {
-
-      if (!selectedRegion) {
-        return null;
-      }
-
-      return (
-        organizations.find(
-          (organization) =>
-            String(
-              organization.id
-            ) ===
-            String(
-              selectedRegion
-                .organizationId
-            )
-        ) ?? null
-      );
-
-    }, [
-      organizations,
-      selectedRegion,
-    ]);
-
-
-  // ============================================================
-  // KML UPLOAD
-  // ============================================================
-
-  const handleKmlUpload =
-    async (
-      event:
-        ChangeEvent<HTMLInputElement>
-    ) => {
-
-      const file =
-        event.target.files?.[0];
-
-      event.target.value = "";
-
-      setError("");
-
-      if (!file) {
-        return;
-      }
-
-
-      if (!selectedRegion) {
-
-        setError(
-          "Region details are not available."
-        );
-
-        return;
-      }
-
-
-      if (
-        !file.name
-          .toLowerCase()
-          .endsWith(".kml")
-      ) {
-
-        setError(
-          "Please select a valid KML file."
-        );
-
-        return;
-      }
-
-
-      try {
-
-        setProcessingKml(
-          true
-        );
-
-
-        // ======================================================
-        // READ KML
-        // ======================================================
-
-        const kmlText =
-          await file.text();
-
-
-        const xml =
-          new DOMParser()
-            .parseFromString(
-              kmlText,
-              "text/xml"
+          if (
+            lastRegion?.regionId
+          ) {
+            setSelectedRegionId(
+              lastRegion.regionId
+            );
+          } else if (
+            nextRegions.length > 0
+          ) {
+            setSelectedRegionId(
+              getRegionId(
+                nextRegions[0]
+              )
+            );
+          }
+        } catch (err) {
+          const lastRegion =
+            readLastCreatedRegion();
+
+          if (lastRegion) {
+            setStoredRegion(
+              lastRegion
             );
 
+            setRegions([
+              {
+                id:
+                  lastRegion.regionId,
+
+                region_id:
+                  lastRegion.regionId,
+
+                organization_id:
+                  lastRegion.organizationId,
+
+                country:
+                  lastRegion.country,
+
+                state:
+                  lastRegion.state,
+
+                name:
+                  lastRegion.regionName,
+              },
+            ]);
+
+            setSelectedRegionId(
+              lastRegion.regionId
+            );
+          } else {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Failed to load regions."
+            );
+          }
+        } finally {
+          setLoading(false);
+        }
+      };
+
+    void loadRegions();
+  }, []);
+
+  const selectedRegion =
+    useMemo(
+      () =>
+        regions.find(
+          (region) =>
+            getRegionId(
+              region
+            ) ===
+            selectedRegionId
+        ) ?? null,
+      [
+        regions,
+        selectedRegionId,
+      ]
+    );
+
+  const regionName =
+    useMemo(() => {
+      const value =
+        selectedRegion
+          ? getRegionName(
+              selectedRegion
+            )
+          : "";
+
+      if (value) {
+        return value;
+      }
+
+      if (
+        storedRegion &&
+        storedRegion.regionId ===
+          selectedRegionId
+      ) {
+        return storedRegion.regionName;
+      }
+
+      return "";
+    }, [
+      selectedRegion,
+      selectedRegionId,
+      storedRegion,
+    ]);
+
+  const organizationId =
+    useMemo(() => {
+      const value =
+        selectedRegion
+          ? getOrganizationId(
+              selectedRegion
+            )
+          : "";
+
+      if (value) {
+        return value;
+      }
+
+      if (
+        storedRegion &&
+        storedRegion.regionId ===
+          selectedRegionId
+      ) {
+        return storedRegion.organizationId;
+      }
+
+      return "";
+    }, [
+      selectedRegion,
+      selectedRegionId,
+      storedRegion,
+    ]);
+
+  const country =
+    useMemo(() => {
+      const value =
+        selectedRegion
+          ? getCountry(
+              selectedRegion
+            )
+          : "";
+
+      if (value) {
+        return value;
+      }
+
+      if (
+        storedRegion &&
+        storedRegion.regionId ===
+          selectedRegionId
+      ) {
+        return storedRegion.country;
+      }
+
+      return "";
+    }, [
+      selectedRegion,
+      selectedRegionId,
+      storedRegion,
+    ]);
+
+  const state =
+    useMemo(() => {
+      const value =
+        selectedRegion
+          ? getState(
+              selectedRegion
+            )
+          : "";
+
+      if (value) {
+        return value;
+      }
+
+      if (
+        storedRegion &&
+        storedRegion.regionId ===
+          selectedRegionId
+      ) {
+        return storedRegion.state;
+      }
+
+      return "";
+    }, [
+      selectedRegion,
+      selectedRegionId,
+      storedRegion,
+    ]);
+
+  const handleFile = (
+    event:
+      ChangeEvent<HTMLInputElement>
+  ) => {
+    setError("");
+    setSuccess("");
+
+    const file =
+      event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (
+      !file.name
+        .toLowerCase()
+        .endsWith(".kml")
+    ) {
+      setKmlFile(null);
+
+      setError(
+        "Please upload a valid .kml file."
+      );
+
+      event.target.value =
+        "";
+
+      return;
+    }
+
+    setKmlFile(file);
+
+    setSuccess(
+      "KML file selected successfully."
+    );
+  };
+
+  const handleSubmit =
+    async () => {
+      setError("");
+      setSuccess("");
+
+      if (!selectedRegionId) {
+        setError(
+          "Please select a region."
+        );
+
+        return;
+      }
+
+      if (
+        !organizationId ||
+        !country ||
+        !state
+      ) {
+        setError(
+          "Region details are incomplete."
+        );
+
+        return;
+      }
+
+      if (!kmlFile) {
+        setError(
+          "Please upload a KML file."
+        );
+
+        return;
+      }
+
+      try {
+        setSubmitting(true);
+
+        const base64 =
+          await fileToBase64(
+            kmlFile
+          );
+
+        const result =
+          await uploadRegionKml({
+            region_id:
+              selectedRegionId,
+
+            kml_file_name:
+              kmlFile.name,
+
+            kml_file_content:
+              base64,
+          });
 
         if (
-          xml.querySelector(
-            "parsererror"
-          )
+          result?.success ===
+          false
         ) {
-
           throw new Error(
-            "Invalid KML file."
+            result?.error ||
+              result?.message ||
+              "UploadRegion Lambda failed."
           );
-
         }
 
+        const fields =
+          result?.fields?.items ??
+          [];
 
-        const geoJson =
-          toGeoJSON.kml(
-            xml
-          );
+        const count =
+          result?.fields?.count ??
+          fields.length;
 
+        const geoJson = {
+          type:
+            "FeatureCollection",
 
-        if (
-          !geoJson.features ||
-          geoJson.features
-            .length === 0
-        ) {
+          features:
+            fields.map(
+              (
+                field: any,
+                index: number
+              ) => ({
+                type:
+                  "Feature",
 
-          throw new Error(
-            "No field polygons found in the KML file."
-          );
+                geometry:
+                  field.geometry,
 
-        }
+                properties: {
+                  geometry_reference_id:
+                    field.geometry_reference_id,
 
+                  temp_field_id:
+                    field.temp_field_id,
 
-        // ======================================================
-        // SAVE GEOMETRY LOCALLY
-        // ======================================================
+                  field_index:
+                    field.field_index ??
+                    index + 1,
+
+                  field_name:
+                    field.field_name ??
+                    `Field ${
+                      index + 1
+                    }`,
+
+                  region_id:
+                    selectedRegionId,
+
+                  organization_id:
+                    organizationId,
+
+                  country,
+
+                  state,
+                },
+              })
+            ),
+        };
 
         localStorage.setItem(
-
-          `regionGeometry:${selectedRegion.regionId}`,
+          `regionGeometry:${selectedRegionId}`,
 
           JSON.stringify(
             geoJson
           )
-
         );
 
-
-        // ======================================================
-        // SAVE CURRENT REGION FOR CROP PAGE
-        // ======================================================
-
         localStorage.setItem(
-
           "pendingCropRegion",
 
           JSON.stringify({
             regionId:
-              selectedRegion.regionId,
+              selectedRegionId,
 
-            regionName:
-              selectedRegion.name,
+            regionName,
 
-            organizationId:
-              selectedRegion
-                .organizationId,
+            organizationId,
 
-            country:
-              selectedRegion.country,
+            country,
 
-            state:
-              selectedRegion.state,
+            state,
           })
-
         );
 
-
-        localStorage.setItem(
-
-          "frontendFieldInfo",
-
-          JSON.stringify({
-            regionId:
-              selectedRegion.regionId,
-
-            regionName:
-              selectedRegion.name,
-
-            organizationId:
-              selectedRegion
-                .organizationId,
-
-            country:
-              selectedRegion.country,
-
-            state:
-              selectedRegion.state,
-
-            kmlFileName:
-              file.name,
-
-            fieldCount:
-              geoJson.features.length,
-          })
-
+        setCreatedFieldCount(
+          count
         );
 
-
-        setKmlFileName(
-          file.name
+        setLambdaStatus(
+          "success"
         );
 
-        setFieldCount(
-          geoJson.features.length
+        setLambdaDetail(
+          result?.message ||
+            "KML processed successfully."
         );
 
+        setSuccess(
+          `${count} field polygon(s) created successfully.`
+        );
 
-        // ======================================================
-        // NO AUTOMATIC REDIRECT
-        // ======================================================
+        setKmlFile(null);
 
-        setSuccessOpen(
+        // FIRST SHOW POPUP
+        setCompletionOpen(
           true
         );
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "UploadRegion Lambda failed.";
 
-      } catch (
-        uploadError
-      ) {
+        setError(message);
 
-        console.error(
-          uploadError
+        setLambdaStatus(
+          "error"
         );
 
-        setError(
-          uploadError instanceof Error
-            ? uploadError.message
-            : "Unable to process KML file."
+        setLambdaDetail(
+          message
         );
 
+        // FAILURE ALSO SHOWS POPUP
+        setCompletionOpen(
+          true
+        );
       } finally {
-
-        setProcessingKml(
-          false
-        );
-
+        setSubmitting(false);
       }
-
     };
 
-
-  // ============================================================
-  // UPLOAD CROP DETAILS BUTTON
-  // ============================================================
-
-  const handleGoToCropDetails =
+  const handleUploadCropDetails =
     () => {
-
-      if (!selectedRegion) {
-        return;
-      }
-
-      setSuccessOpen(
+      setCompletionOpen(
         false
       );
 
-      onGoToCropDetails(
-        selectedRegion.regionId,
-        selectedRegion.name
-      );
+      if (
+        onGoToCropDetails
+      ) {
+        onGoToCropDetails(
+          selectedRegionId,
+          regionName
+        );
 
+        return;
+      }
+
+      if (onNavigate) {
+        onNavigate(
+          "region-upload-crop-details"
+        );
+
+        return;
+      }
+
+      setSuccess(
+        "Open Upload Crop Details from the sidebar."
+      );
     };
 
-
-  // ============================================================
-  // UI
-  // ============================================================
-
   return (
-
-    <Box
-      maxWidth={650}
-      mx="auto"
-    >
-
-      <Paper
-        elevation={3}
-        sx={{
-          p: 4,
-          borderRadius: 3,
-        }}
+    <>
+      <Box
+        maxWidth={650}
+        mx="auto"
       >
-
-        <Typography
-          variant="h5"
-          fontWeight="bold"
-          mb={1}
-        >
-          🌱 Create Field
-        </Typography>
-
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          mb={3}
-        >
-          Region details are automatically loaded from the region you created.
-        </Typography>
-
-
-        {error && (
-
-          <Alert
-            severity="error"
-            sx={{ mb: 2 }}
-          >
-            {error}
-          </Alert>
-
-        )}
-
-
-        {/* ==================================================== */}
-        {/* REGION */}
-        {/* AUTO SELECTED */}
-        {/* USER CAN CHANGE REGION ONLY IF REQUIRED */}
-        {/* ==================================================== */}
-
-        <FormControl
-          fullWidth
-          sx={{ mb: 2 }}
-          disabled={
-            regions.length === 0
-          }
-        >
-
-          <InputLabel>
-            Region
-          </InputLabel>
-
-          <Select
-            label="Region"
-
-            value={
-              selectedRegionId
-            }
-
-            onChange={(
-              event
-            ) => {
-
-              setSelectedRegionId(
-                String(
-                  event.target.value
-                )
-              );
-
-            }}
-          >
-
-            {regions.map(
-              (region) => (
-
-                <MenuItem
-                  key={
-                    region.regionId
-                  }
-
-                  value={
-                    region.regionId
-                  }
-                >
-                  {region.name}
-                </MenuItem>
-
-              )
-            )}
-
-          </Select>
-
-        </FormControl>
-
-
-        {/* ==================================================== */}
-        {/* ORGANISATION AUTO FILLED */}
-        {/* ==================================================== */}
-
-        <TextField
-          fullWidth
-          label="Organisation"
-          sx={{ mb: 2 }}
-          disabled
-
-          value={
-            loadingOrganizations
-              ? "Loading..."
-              : selectedOrganization
-                ? `${selectedOrganization.id} — ${selectedOrganization.name}`
-                : selectedRegion?.organizationId ?? ""
-          }
-
-          InputProps={{
-            readOnly: true,
-          }}
-        />
-
-
-        {/* ==================================================== */}
-        {/* COUNTRY AUTO FILLED */}
-        {/* ==================================================== */}
-
-        <TextField
-          fullWidth
-          label="Country"
-          sx={{ mb: 2 }}
-          disabled
-
-          value={
-            selectedRegion?.country ??
-            ""
-          }
-
-          InputProps={{
-            readOnly: true,
-          }}
-        />
-
-
-        {/* ==================================================== */}
-        {/* STATE AUTO FILLED */}
-        {/* ==================================================== */}
-
-        <TextField
-          fullWidth
-          label="State"
-          sx={{ mb: 3 }}
-          disabled
-
-          value={
-            selectedRegion?.state ??
-            ""
-          }
-
-          InputProps={{
-            readOnly: true,
-          }}
-        />
-
-
-        {/* ==================================================== */}
-        {/* KML */}
-        {/* ==================================================== */}
-
-        <Button
-          component="label"
-
-          variant="contained"
-
-          fullWidth
-
-          disabled={
-            !selectedRegion ||
-            processingKml
-          }
-
+        <Paper
+          elevation={3}
           sx={{
-            py: 1.3,
-
-            backgroundColor:
-              "#2D6A4F",
-
-            "&:hover": {
-              backgroundColor:
-                "#1B4332",
-            },
+            p: 4,
+            borderRadius: 3,
           }}
         >
+          <Typography
+            variant="h5"
+            fontWeight="bold"
+            mb={1}
+          >
+            🗺️ Create Field
+          </Typography>
 
-          {processingKml
-            ? "Processing KML..."
-            : "Upload KML"}
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            mb={3}
+          >
+            Select a region.
+            Organisation ID,
+            Country and State are
+            filled automatically.
+          </Typography>
 
-          <input
-            hidden
-            type="file"
+          {error && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+            >
+              {error}
+            </Alert>
+          )}
 
-            accept=".kml,application/vnd.google-earth.kml+xml"
+          {success && (
+            <Alert
+              severity="success"
+              sx={{ mb: 2 }}
+            >
+              {success}
+            </Alert>
+          )}
 
-            onChange={
-              handleKmlUpload
+          <FormControl
+            fullWidth
+            required
+            sx={{ mb: 2 }}
+            disabled={
+              loading ||
+              submitting
             }
+          >
+            <InputLabel>
+              Region
+            </InputLabel>
+
+            <Select
+              value={
+                selectedRegionId
+              }
+              label="Region"
+              onChange={(
+                event
+              ) => {
+                setSelectedRegionId(
+                  String(
+                    event.target
+                      .value
+                  )
+                );
+
+                setKmlFile(
+                  null
+                );
+
+                setError("");
+                setSuccess("");
+              }}
+            >
+              {regions.map(
+                (region) => {
+                  const id =
+                    getRegionId(
+                      region
+                    );
+
+                  return (
+                    <MenuItem
+                      key={id}
+                      value={id}
+                    >
+                      {id} —{" "}
+                      {getRegionName(
+                        region
+                      )}
+                    </MenuItem>
+                  );
+                }
+              )}
+            </Select>
+          </FormControl>
+
+          <TextField
+            fullWidth
+            label="Organisation ID"
+            value={
+              organizationId
+            }
+            disabled
+            sx={{ mb: 2 }}
           />
 
-        </Button>
+          <TextField
+            fullWidth
+            label="Country"
+            value={country}
+            disabled
+            sx={{ mb: 2 }}
+          />
 
+          <TextField
+            fullWidth
+            label="State"
+            value={state}
+            disabled
+            sx={{ mb: 2 }}
+          />
 
-        {processingKml && (
+          <TextField
+            fullWidth
+            label="Region Name"
+            value={regionName}
+            disabled
+            sx={{ mb: 3 }}
+          />
 
-          <Box
-            mt={2}
-            display="flex"
-            justifyContent="center"
+          <Button
+            component="label"
+            variant="outlined"
+            fullWidth
+            disabled={
+              submitting ||
+              !selectedRegionId
+            }
+            sx={{
+              minHeight: 45,
+              mb: 1,
+            }}
           >
+            UPLOAD KML
 
-            <CircularProgress
-              size={26}
+            <input
+              hidden
+              type="file"
+              accept=".kml,application/vnd.google-earth.kml+xml"
+              onChange={
+                handleFile
+              }
             />
+          </Button>
 
-          </Box>
+          {kmlFile ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{
+                mt: 1,
+                mb: 3,
+              }}
+            >
+              Selected file:{" "}
+              {kmlFile.name}
+            </Typography>
+          ) : (
+            <Box mb={3} />
+          )}
 
-        )}
+          <Button
+            fullWidth
+            variant="contained"
+            onClick={
+              handleSubmit
+            }
+            disabled={
+              submitting ||
+              !selectedRegionId ||
+              !kmlFile
+            }
+            sx={{
+              minHeight: 45,
 
-      </Paper>
+              backgroundColor:
+                "#075d16",
 
+              "&:hover": {
+                backgroundColor:
+                  "#064d12",
+              },
+            }}
+          >
+            {submitting ? (
+              <>
+                <CircularProgress
+                  size={21}
+                  color="inherit"
+                  sx={{ mr: 1 }}
+                />
 
-      {/* ====================================================== */}
-      {/* KML SUCCESS POPUP */}
-      {/* ====================================================== */}
+                TRIGGERING
+                LAMBDA...
+              </>
+            ) : (
+              "CREATE FIELD"
+            )}
+          </Button>
+        </Paper>
+      </Box>
+
+      {/* ==================================================== */}
+      {/* LAMBDA RESULT POPUP */}
+      {/* ==================================================== */}
 
       <Dialog
         open={
-          successOpen
+          completionOpen
         }
-
         onClose={() =>
-          setSuccessOpen(
+          setCompletionOpen(
             false
           )
         }
-
         fullWidth
         maxWidth="sm"
       >
-
         <DialogTitle>
-          KML Uploaded Successfully
+          {lambdaStatus ===
+          "success"
+            ? "Field Process Completed"
+            : "Field Process Failed"}
         </DialogTitle>
 
-
         <DialogContent>
-
           <Alert
-            severity="success"
-            sx={{
-              mt: 1,
-              mb: 2,
-            }}
+            severity={
+              lambdaStatus ===
+              "success"
+                ? "success"
+                : "error"
+            }
+            sx={{ mt: 1 }}
           >
-            Field KML processed successfully.
+            <Typography
+              fontWeight="bold"
+              mb={1}
+            >
+              UploadRegion
+              Lambda:{" "}
+              {lambdaStatus}
+            </Typography>
+
+            <Typography
+              variant="body2"
+              mb={1}
+            >
+              {lambdaDetail}
+            </Typography>
+
+            {lambdaStatus ===
+              "success" && (
+              <>
+                <Typography
+                  variant="body2"
+                >
+                  Region:{" "}
+                  {regionName}
+                </Typography>
+
+                <Typography
+                  variant="body2"
+                >
+                  Region ID:{" "}
+                  {
+                    selectedRegionId
+                  }
+                </Typography>
+
+                <Typography
+                  variant="body2"
+                >
+                  Field polygons:{" "}
+                  {
+                    createdFieldCount
+                  }
+                </Typography>
+              </>
+            )}
           </Alert>
-
-
-          <Typography
-            mb={1}
-          >
-            <strong>
-              Region:
-            </strong>{" "}
-            {selectedRegion?.name}
-          </Typography>
-
-
-          <Typography
-            mb={1}
-          >
-            <strong>
-              Country:
-            </strong>{" "}
-            {selectedRegion?.country}
-          </Typography>
-
-
-          <Typography
-            mb={1}
-          >
-            <strong>
-              State:
-            </strong>{" "}
-            {selectedRegion?.state}
-          </Typography>
-
-
-          <Typography
-            mb={1}
-          >
-            <strong>
-              KML File:
-            </strong>{" "}
-            {kmlFileName}
-          </Typography>
-
-
-          <Typography>
-            <strong>
-              Fields detected:
-            </strong>{" "}
-            {fieldCount}
-          </Typography>
-
         </DialogContent>
 
-
         <DialogActions>
-
           <Button
             onClick={() =>
-              setSuccessOpen(
+              setCompletionOpen(
                 false
               )
             }
           >
-            Close
+            CLOSE
           </Button>
 
-
-          <Button
-            variant="contained"
-
-            onClick={
-              handleGoToCropDetails
-            }
-
-            sx={{
-              backgroundColor:
-                "#2D6A4F",
-
-              "&:hover": {
+          {lambdaStatus ===
+            "success" && (
+            <Button
+              variant="contained"
+              onClick={
+                handleUploadCropDetails
+              }
+              sx={{
                 backgroundColor:
-                  "#1B4332",
-              },
-            }}
-          >
-            Upload Crop Details
-          </Button>
+                  "#075d16",
 
+                "&:hover": {
+                  backgroundColor:
+                    "#064d12",
+                },
+              }}
+            >
+              UPLOAD CROP
+              DETAILS
+            </Button>
+          )}
         </DialogActions>
-
       </Dialog>
-
-    </Box>
-
+    </>
   );
 }

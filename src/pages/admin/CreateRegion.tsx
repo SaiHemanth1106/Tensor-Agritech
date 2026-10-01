@@ -1,6 +1,6 @@
-import {
+﻿import {
   useEffect,
-  useState
+  useState,
 } from "react";
 
 import {
@@ -14,25 +14,20 @@ import {
   Paper,
   Select,
   TextField,
-  Typography
+  Typography,
 } from "@mui/material";
 
 import {
-  getOrganizations
-} from "../../services/api";
-
-
-// ============================================================
-// TYPES
-// ============================================================
+  createRegion,
+  getOrganizations,
+} from "../../services/regionApi";
 
 interface Organization {
   id: number;
   name: string;
 }
 
-interface StaticRegion {
-  regionId: string;
+interface RegionForm {
   organizationId: string;
   country: string;
   state: string;
@@ -40,43 +35,31 @@ interface StaticRegion {
   description: string;
 }
 
+const initialForm: RegionForm = {
+  organizationId: "",
+  country: "",
+  state: "",
+  name: "",
+  description: "",
+};
 
-// ============================================================
-// STORAGE
-// ============================================================
-
-const REGION_STORAGE_KEY =
-  "frontendStaticRegions";
-
-
-// ============================================================
-// ORGANIZATION RESPONSE HELPER
-// ============================================================
-
-const getOrganizationList = (
+const extractOrganizations = (
   response: any
 ): Organization[] => {
-
-  if (
-    Array.isArray(response)
-  ) {
+  if (Array.isArray(response)) {
     return response;
   }
 
   if (
-    response &&
     Array.isArray(
-      response.organizations
+      response?.organizations
     )
   ) {
     return response.organizations;
   }
 
   if (
-    response &&
-    Array.isArray(
-      response.data
-    )
+    Array.isArray(response?.data)
   ) {
     return response.data;
   }
@@ -84,312 +67,242 @@ const getOrganizationList = (
   return [];
 };
 
-
-// ============================================================
-// COMPONENT
-// ============================================================
-
 export default function CreateRegion() {
-
   const [
     organizations,
-    setOrganizations
-  ] =
-    useState<
-      Organization[]
-    >([]);
+    setOrganizations,
+  ] = useState<Organization[]>([]);
 
   const [
-    organizationId,
-    setOrganizationId
-  ] =
-    useState("");
-
-  const [
-    country,
-    setCountry
-  ] =
-    useState("");
-
-  const [
-    state,
-    setState
-  ] =
-    useState("");
-
-  const [
-    regionName,
-    setRegionName
-  ] =
-    useState("");
-
-  const [
-    description,
-    setDescription
-  ] =
-    useState("");
+    form,
+    setForm,
+  ] = useState<RegionForm>(
+    initialForm
+  );
 
   const [
     loadingOrganizations,
-    setLoadingOrganizations
-  ] =
-    useState(true);
+    setLoadingOrganizations,
+  ] = useState(true);
+
+  const [
+    submitting,
+    setSubmitting,
+  ] = useState(false);
 
   const [
     error,
-    setError
-  ] =
-    useState("");
+    setError,
+  ] = useState("");
 
   const [
     success,
-    setSuccess
-  ] =
-    useState("");
-
-
-  // ============================================================
-  // LOAD ORGANIZATIONS
-  // ============================================================
+    setSuccess,
+  ] = useState("");
 
   useEffect(() => {
-
     const loadOrganizations =
       async () => {
-
         try {
-
           setLoadingOrganizations(
             true
           );
 
+          setError("");
+
           const response =
             await getOrganizations();
 
-          const list =
-            getOrganizationList(
-              response
-            );
-
           setOrganizations(
-            list
+            extractOrganizations(
+              response
+            )
           );
-
-        } catch (
-          loadError
-        ) {
-
-          console.error(
-            "Failed to load organizations:",
-            loadError
-          );
-
+        } catch (err) {
           setError(
-            "Failed to load organizations."
+            err instanceof Error
+              ? err.message
+              : "Failed to load organizations."
           );
-
         } finally {
-
           setLoadingOrganizations(
             false
           );
-
         }
-
       };
 
     void loadOrganizations();
-
   }, []);
 
+  const updateField = (
+    field: keyof RegionForm,
+    value: string
+  ) => {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
 
-  // ============================================================
-  // CREATE REGION - FRONTEND ONLY
-  // ============================================================
-
-  const handleCreateRegion =
-    () => {
-
+  const handleSubmit =
+    async () => {
       setError("");
       setSuccess("");
 
-      if (
-        !organizationId ||
-        !country.trim() ||
-        !state.trim() ||
-        !regionName.trim() ||
-        !description.trim()
-      ) {
-
+      if (!form.organizationId) {
         setError(
-          "Please fill all region details."
+          "Please select Organisation ID."
         );
 
         return;
       }
 
+      if (!form.country.trim()) {
+        setError(
+          "Please enter Country."
+        );
 
-      // --------------------------------------------------------
-      // LOAD PREVIOUS STATIC REGIONS
-      // --------------------------------------------------------
+        return;
+      }
 
-      let existingRegions:
-        StaticRegion[] = [];
+      if (!form.state.trim()) {
+        setError(
+          "Please enter State."
+        );
+
+        return;
+      }
+
+      if (!form.name.trim()) {
+        setError(
+          "Please enter Region Name."
+        );
+
+        return;
+      }
+
+      if (
+        !form.description.trim()
+      ) {
+        setError(
+          "Please enter Description."
+        );
+
+        return;
+      }
 
       try {
+        setSubmitting(true);
 
-        const stored =
-          localStorage.getItem(
-            REGION_STORAGE_KEY
+        const result =
+          await createRegion({
+            organization_id:
+              Number(
+                form.organizationId
+              ),
+
+            country:
+              form.country.trim(),
+
+            state:
+              form.state.trim(),
+
+            name:
+              form.name.trim(),
+
+            description:
+              form.description.trim(),
+          });
+
+        if (
+          result?.success ===
+          false
+        ) {
+          throw new Error(
+            result?.error ||
+              result?.message ||
+              "Region creation failed."
           );
-
-        if (stored) {
-
-          const parsed =
-            JSON.parse(
-              stored
-            );
-
-          if (
-            Array.isArray(
-              parsed
-            )
-          ) {
-
-            existingRegions =
-              parsed;
-
-          }
-
         }
 
-      } catch {
+        const regionId =
+          result?.region_id ??
+          result?.region?.region_id ??
+          result?.id;
 
-        existingRegions = [];
+        if (!regionId) {
+          throw new Error(
+            "Region was created but region_id was not returned."
+          );
+        }
 
-      }
+        const regionData = {
+          regionId:
+            String(regionId),
 
-
-      // --------------------------------------------------------
-      // DUPLICATE CHECK
-      // --------------------------------------------------------
-
-      const duplicate =
-        existingRegions.some(
-          (region) =>
-
+          organizationId:
             String(
-              region.organizationId
-            ) ===
-              String(
-                organizationId
-              ) &&
+              result?.organization_id ??
+                form.organizationId
+            ),
 
-            region.name
-              .trim()
-              .toLowerCase() ===
-              regionName
-                .trim()
-                .toLowerCase()
+          country:
+            result?.country ??
+            form.country.trim(),
 
+          state:
+            result?.state ??
+            form.state.trim(),
+
+          regionName:
+            result?.name ??
+            form.name.trim(),
+
+          description:
+            result?.description ??
+            form.description.trim(),
+        };
+
+        localStorage.setItem(
+          "lastCreatedRegion",
+          JSON.stringify(
+            regionData
+          )
         );
 
-      if (duplicate) {
+        localStorage.setItem(
+          "lastCreatedRegionId",
+          String(regionId)
+        );
 
+        setSuccess(
+          `Region created successfully. Region ID: ${regionId}`
+        );
+
+        setForm(initialForm);
+      } catch (err) {
         setError(
-          "This region already exists for the selected organization."
+          err instanceof Error
+            ? err.message
+            : "Failed to create region."
         );
-
-        return;
+      } finally {
+        setSubmitting(false);
       }
-
-
-      // --------------------------------------------------------
-      // CREATE FRONTEND REGION
-      // --------------------------------------------------------
-
-      const newRegion:
-        StaticRegion = {
-
-        regionId:
-          `STATIC-${Date.now()}`,
-
-        organizationId:
-          String(
-            organizationId
-          ),
-
-        country:
-          country.trim(),
-
-        state:
-          state.trim(),
-
-        name:
-          regionName.trim(),
-
-        description:
-          description.trim()
-
-      };
-
-
-      // --------------------------------------------------------
-      // SAVE LOCALLY
-      // --------------------------------------------------------
-
-      localStorage.setItem(
-        REGION_STORAGE_KEY,
-
-        JSON.stringify([
-          ...existingRegions,
-          newRegion
-        ])
-      );
-
-
-      // --------------------------------------------------------
-      // SUCCESS
-      // --------------------------------------------------------
-
-      setSuccess(
-        `Region "${newRegion.name}" created successfully.`
-      );
-
-
-      // --------------------------------------------------------
-      // RESET FORM
-      // --------------------------------------------------------
-
-      setOrganizationId("");
-      setCountry("");
-      setState("");
-      setRegionName("");
-      setDescription("");
-
     };
 
-
-  // ============================================================
-  // UI
-  // ============================================================
-
   return (
-
     <Box
       maxWidth={650}
       mx="auto"
     >
-
       <Paper
         elevation={3}
-
         sx={{
           p: 4,
-          borderRadius: 3
+          borderRadius: 3,
         }}
       >
-
         <Typography
           variant="h5"
           fontWeight="bold"
@@ -398,271 +311,175 @@ export default function CreateRegion() {
           📍 Create Region
         </Typography>
 
-
         <Typography
           variant="body2"
           color="text.secondary"
           mb={3}
         >
-          Enter the region details.
+          Create the region first.
+          KML upload is available
+          separately under Create
+          Field.
         </Typography>
 
-
-        {/* ERROR */}
-
         {error && (
-
           <Alert
             severity="error"
             sx={{ mb: 2 }}
           >
             {error}
           </Alert>
-
         )}
 
-
-        {/* SUCCESS */}
-
         {success && (
-
           <Alert
             severity="success"
             sx={{ mb: 2 }}
           >
             {success}
           </Alert>
-
         )}
-
-
-        {/* ==================================================== */}
-        {/* ORGANIZATION */}
-        {/* ==================================================== */}
 
         <FormControl
           fullWidth
           required
           sx={{ mb: 2 }}
+          disabled={
+            loadingOrganizations ||
+            submitting
+          }
         >
-
           <InputLabel>
             Organisation ID
           </InputLabel>
 
           <Select
             value={
-              organizationId
+              form.organizationId
             }
-
             label="Organisation ID"
-
-            disabled={
-              loadingOrganizations
-            }
-
-            onChange={(
-              event
-            ) => {
-
-              setOrganizationId(
+            onChange={(event) =>
+              updateField(
+                "organizationId",
                 String(
                   event.target.value
                 )
-              );
-
-            }}
+              )
+            }
           >
-
             {organizations.map(
               (organization) => (
-
                 <MenuItem
                   key={
                     organization.id
                   }
-
                   value={
-                    String(
-                      organization.id
-                    )
+                    organization.id
                   }
                 >
-                  {organization.id}
-                  {" — "}
+                  {organization.id} —{" "}
                   {organization.name}
                 </MenuItem>
-
               )
             )}
-
           </Select>
-
         </FormControl>
 
-
-        {loadingOrganizations && (
-
-          <Box
-            display="flex"
-            alignItems="center"
-            gap={1}
-            mb={2}
-          >
-
-            <CircularProgress
-              size={18}
-            />
-
-            <Typography
-              variant="body2"
-              color="text.secondary"
-            >
-              Loading organizations...
-            </Typography>
-
-          </Box>
-
-        )}
-
-
-        {/* ==================================================== */}
-        {/* COUNTRY */}
-        {/* ==================================================== */}
-
         <TextField
           fullWidth
           required
-
           label="Country"
-
-          value={
-            country
-          }
-
-          onChange={(
-            event
-          ) =>
-            setCountry(
+          value={form.country}
+          disabled={submitting}
+          onChange={(event) =>
+            updateField(
+              "country",
               event.target.value
             )
           }
-
           sx={{ mb: 2 }}
         />
-
-
-        {/* ==================================================== */}
-        {/* STATE */}
-        {/* ==================================================== */}
 
         <TextField
           fullWidth
           required
-
           label="State"
-
-          value={
-            state
-          }
-
-          onChange={(
-            event
-          ) =>
-            setState(
+          value={form.state}
+          disabled={submitting}
+          onChange={(event) =>
+            updateField(
+              "state",
               event.target.value
             )
           }
-
           sx={{ mb: 2 }}
         />
-
-
-        {/* ==================================================== */}
-        {/* REGION NAME */}
-        {/* ==================================================== */}
 
         <TextField
           fullWidth
           required
-
           label="Region Name"
-
-          value={
-            regionName
-          }
-
-          onChange={(
-            event
-          ) =>
-            setRegionName(
+          value={form.name}
+          disabled={submitting}
+          onChange={(event) =>
+            updateField(
+              "name",
               event.target.value
             )
           }
-
           sx={{ mb: 2 }}
         />
-
-
-        {/* ==================================================== */}
-        {/* DESCRIPTION */}
-        {/* ==================================================== */}
 
         <TextField
           fullWidth
           required
           multiline
-          minRows={3}
-
+          rows={3}
           label="Description"
-
           value={
-            description
+            form.description
           }
-
-          onChange={(
-            event
-          ) =>
-            setDescription(
+          disabled={submitting}
+          onChange={(event) =>
+            updateField(
+              "description",
               event.target.value
             )
           }
-
           sx={{ mb: 3 }}
         />
 
-
-        {/* ==================================================== */}
-        {/* CREATE */}
-        {/* ==================================================== */}
-
         <Button
           fullWidth
-
           variant="contained"
-
-          onClick={
-            handleCreateRegion
-          }
-
+          disabled={submitting}
+          onClick={handleSubmit}
           sx={{
-            py: 1.3,
-
+            minHeight: 45,
             backgroundColor:
-              "#2D6A4F",
+              "#075d16",
 
             "&:hover": {
               backgroundColor:
-                "#1B4332"
-            }
+                "#064d12",
+            },
           }}
         >
-          Create Region
+          {submitting ? (
+            <>
+              <CircularProgress
+                size={21}
+                color="inherit"
+                sx={{ mr: 1 }}
+              />
+
+              CREATING...
+            </>
+          ) : (
+            "CREATE REGION"
+          )}
         </Button>
-
       </Paper>
-
     </Box>
-
   );
 }
