@@ -22,15 +22,16 @@ import DeactivateOrganization from "./pages/admin/DeactivateOrganization";
 import CreateUser from "./pages/admin/CreateUser";
 import DeactivateUser from "./pages/admin/DeactivateUser";
 import DisableMonitoring from "./pages/admin/DisableMonitoring";
+
 import CreateRegion from "./pages/admin/CreateRegion";
+import CreateField from "./pages/admin/CreateField";
 import RegionManagement from "./pages/admin/RegionManagement";
 import UploadCropDetails from "./pages/admin/UploadCropDetails";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
 
-  const [page, setPage] =
-    useState<string>("");
+  const [page, setPage] = useState<string>("");
 
   // ============================================================
   // RESTORE USER
@@ -90,14 +91,10 @@ export default function App() {
   };
 
   // ============================================================
-  // CREATE REGION COMPLETED
-  //
-  // SUCCESS POPUP CLOSE
-  //        ↓
-  // UPLOAD CROP DETAILS
+  // GO TO UPLOAD CROP DETAILS
   // ============================================================
 
-  const handleRegionCreated = (
+  const handleGoToCropDetails = (
     regionId:
       | string
       | number,
@@ -111,36 +108,35 @@ export default function App() {
         regionId:
           String(regionId),
 
-        regionName,
+        regionName
       })
     );
 
-    // AUTOMATIC REDIRECT
     setPage(
       "region-upload-crop-details"
     );
   };
 
   // ============================================================
-  // CROP MAPPING COMPLETED
-  //
-  //        ↓
-  // VIEW REGIONS
+  // CROP MAPPING COMPLETE
   // ============================================================
 
-  const handleCropMappingComplete =
-    (
-      regionName: string
-    ) => {
-      localStorage.setItem(
-        "lastCompletedRegionName",
-        regionName
-      );
+  const handleCropMappingComplete = (
+    regionName: string
+  ) => {
+    localStorage.setItem(
+      "lastCompletedRegionName",
+      regionName
+    );
 
-      setPage(
-        "region-management"
-      );
-    };
+    localStorage.removeItem(
+      "pendingCropRegion"
+    );
+
+    setPage(
+      "region-management"
+    );
+  };
 
   // ============================================================
   // LOGIN
@@ -170,10 +166,15 @@ export default function App() {
         setPage={setPage}
         logout={handleLogout}
       >
+
+        {/* DASHBOARD */}
+
         {page ===
           "admin-dashboard" && (
           <AdminDashboard />
         )}
+
+        {/* ORGANIZATION */}
 
         {page ===
           "org-create" && (
@@ -184,6 +185,8 @@ export default function App() {
           "org-deactivate" && (
           <DeactivateOrganization />
         )}
+
+        {/* USER MANAGEMENT */}
 
         {page ===
           "user-create" && (
@@ -198,10 +201,16 @@ export default function App() {
         {/* CREATE REGION */}
 
         {page ===
-          "region-create" && (
-          <CreateRegion
+  "region-create" && (
+  <CreateRegion />
+)}
+        {/* CREATE FIELD */}
+
+        {page ===
+          "field-create" && (
+          <CreateField
             onGoToCropDetails={
-              handleRegionCreated
+              handleGoToCropDetails
             }
           />
         )}
@@ -213,7 +222,7 @@ export default function App() {
           <RegionManagement />
         )}
 
-        {/* STAGE 2 */}
+        {/* UPLOAD CROP DETAILS */}
 
         {page ===
           "region-upload-crop-details" && (
@@ -224,10 +233,13 @@ export default function App() {
           />
         )}
 
+        {/* DISABLE MONITORING */}
+
         {page ===
           "region-disable-monitoring" && (
           <DisableMonitoring />
         )}
+
       </AdminLayout>
     );
   }
@@ -242,6 +254,7 @@ export default function App() {
       logout={handleLogout}
       user={user}
     >
+
       {page ===
         "dashboard" && (
         <Dashboard />
@@ -266,12 +279,13 @@ export default function App() {
         "rec-input" &&
         [
           "scientist",
-          "admin",
+          "admin"
         ].includes(
           user.role
         ) && (
           <AddRecommendation />
         )}
+
     </Layout>
   );
 }
