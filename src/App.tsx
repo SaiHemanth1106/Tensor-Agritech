@@ -1,100 +1,199 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+// ============================================================
+// AUTH
+// ============================================================
 
 import Login from "./pages/Login";
 
-// USER LAYOUT
-import Layout from "./components/Layout";
+// ============================================================
+// LAYOUTS
+// ============================================================
 
-// ADMIN LAYOUT
+import Layout from "./components/Layout";
 import AdminLayout from "./components/AdminLayout";
 
+// ============================================================
 // USER PAGES
+// ============================================================
+
 import Dashboard from "./pages/Dashboard";
 import SoilHealth from "./pages/SoilHealth";
 import CropHealth from "./pages/CropHealth";
 import Recommendations from "./pages/Recommendations";
 import AddRecommendation from "./pages/AddRecommendation";
 
+// ============================================================
 // ADMIN PAGES
+// ============================================================
+
 import AdminDashboard from "./pages/admin/AdminDashboard";
+
 import CreateOrganization from "./pages/admin/CreateOrganization";
 import DeactivateOrganization from "./pages/admin/DeactivateOrganization";
+
 import CreateUser from "./pages/admin/CreateUser";
 import DeactivateUser from "./pages/admin/DeactivateUser";
-import DisableMonitoring from "./pages/admin/DisableMonitoring";
 
 import CreateRegion from "./pages/admin/CreateRegion";
-import CreateField from "./pages/admin/CreateField";
+import CreateFields from "./pages/admin/CreateField";
 import RegionManagement from "./pages/admin/RegionManagement";
 import UploadCropDetails from "./pages/admin/UploadCropDetails";
+import DisableMonitoring from "./pages/admin/DisableMonitoring";
 
-export default function App() {
-  const [user, setUser] = useState<any>(null);
+// ============================================================
+// TYPES
+// ============================================================
 
-  const [page, setPage] = useState<string>("");
+interface AppUser {
+  id?: number | string;
 
-  // ============================================================
-  // RESTORE USER
-  // ============================================================
+  user_id?: number | string;
+
+  username?: string;
+
+  role?: string;
+
+  organization_id?:
+    | number
+    | string;
+
+  organizationId?:
+    | number
+    | string;
+
+  [key: string]: unknown;
+}
+
+// ============================================================
+// APP
+// ============================================================
+
+function App() {
+  const [
+    user,
+    setUser,
+  ] = useState<AppUser | null>(
+    null
+  );
+
+  const [
+    page,
+    setPage,
+  ] = useState<string>("");
+
+  const [
+    initialized,
+    setInitialized,
+  ] = useState(false);
+
+  // ==========================================================
+  // RESTORE LOGIN
+  // ==========================================================
 
   useEffect(() => {
-    const stored =
-      localStorage.getItem("user");
-
-    if (!stored) {
-      return;
-    }
-
     try {
-      setUser(
-        JSON.parse(stored)
+      const storedUser =
+        localStorage.getItem(
+          "user"
+        );
+
+      if (storedUser) {
+        const parsedUser =
+          JSON.parse(
+            storedUser
+          );
+
+        setUser(
+          parsedUser
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Unable to restore user:",
+        error
       );
-    } catch {
+
       localStorage.removeItem(
         "user"
       );
+    } finally {
+      setInitialized(true);
     }
   }, []);
 
-  // ============================================================
-  // DEFAULT PAGE
-  // ============================================================
+  // ==========================================================
+  // DEFAULT PAGE AFTER LOGIN / REFRESH
+  // ==========================================================
 
   useEffect(() => {
     if (!user) {
       return;
     }
 
+    if (page) {
+      return;
+    }
+
     if (
-      user.role === "admin"
+      String(
+        user.role
+      ).toLowerCase() ===
+      "admin"
     ) {
       setPage(
         "admin-dashboard"
       );
-    } else {
-      setPage(
-        "dashboard"
-      );
+
+      return;
     }
-  }, [user]);
 
-  // ============================================================
+    setPage(
+      "dashboard"
+    );
+  }, [
+    user,
+    page,
+  ]);
+
+  // ==========================================================
   // LOGOUT
-  // ============================================================
+  // ==========================================================
 
-  const handleLogout = () => {
-    localStorage.clear();
+  const handleLogout =
+    () => {
+      localStorage.clear();
 
-    setUser(null);
+      setUser(null);
 
-    setPage("");
-  };
+      setPage("");
+    };
 
-  // ============================================================
-  // GO TO UPLOAD CROP DETAILS
-  // ============================================================
+  // ==========================================================
+  // CREATE REGION -> CREATE FIELDS
+  //
+  // Create Region success ayyaka
+  // direct ga Create Fields page ki vellali.
+  // ==========================================================
 
-  const handleGoToCropDetails = (
+  const handleGoToCreateFields =
+    () => {
+      setPage(
+        "field-create"
+      );
+    };
+
+  // ==========================================================
+  // CREATE FIELDS -> UPLOAD CROP DETAILS
+  //
+  // Create Fields Lambda success ayyaka
+  // region ID + region name save chestham.
+  // ==========================================================
+
+  const handleRegionCreated = (
     regionId:
       | string
       | number,
@@ -103,12 +202,13 @@ export default function App() {
   ) => {
     localStorage.setItem(
       "pendingCropRegion",
-
       JSON.stringify({
         regionId:
-          String(regionId),
+          String(
+            regionId
+          ),
 
-        regionName
+        regionName,
       })
     );
 
@@ -117,30 +217,38 @@ export default function App() {
     );
   };
 
-  // ============================================================
+  // ==========================================================
   // CROP MAPPING COMPLETE
-  // ============================================================
+  // ==========================================================
 
-  const handleCropMappingComplete = (
-    regionName: string
-  ) => {
-    localStorage.setItem(
-      "lastCompletedRegionName",
-      regionName
-    );
+  const handleCropMappingComplete =
+    (
+      regionName: string
+    ) => {
+      localStorage.setItem(
+        "lastCompletedRegionName",
+        regionName
+      );
 
-    localStorage.removeItem(
-      "pendingCropRegion"
-    );
+      setPage(
+        "region-management"
+      );
+    };
 
-    setPage(
-      "region-management"
-    );
-  };
+  // ==========================================================
+  // INITIAL LOAD
+  // ==========================================================
 
-  // ============================================================
-  // LOGIN
-  // ============================================================
+  if (!initialized) {
+    return null;
+  }
+
+  // ==========================================================
+  // NOT LOGGED IN
+  //
+  // IMPORTANT:
+  // Existing Login.tsx expects setUser.
+  // ==========================================================
 
   if (!user) {
     return (
@@ -150,43 +258,51 @@ export default function App() {
     );
   }
 
-  if (!page) {
-    return null;
-  }
-
-  // ============================================================
+  // ==========================================================
   // ADMIN
-  // ============================================================
+  // ==========================================================
 
   if (
-    user.role === "admin"
+    String(
+      user.role
+    ).toLowerCase() ===
+    "admin"
   ) {
     return (
       <AdminLayout
-        setPage={setPage}
-        logout={handleLogout}
+        setPage={
+          setPage
+        }
+        logout={
+          handleLogout
+        }
       >
-
-        {/* DASHBOARD */}
+        {/* ====================================================
+            ADMIN DASHBOARD
+        ==================================================== */}
 
         {page ===
           "admin-dashboard" && (
           <AdminDashboard />
         )}
 
-        {/* ORGANIZATION */}
+        {/* ====================================================
+            ORGANIZATION MANAGEMENT
+        ==================================================== */}
 
         {page ===
-          "org-create" && (
+          "organization-create" && (
           <CreateOrganization />
         )}
 
         {page ===
-          "org-deactivate" && (
+          "organization-deactivate" && (
           <DeactivateOrganization />
         )}
 
-        {/* USER MANAGEMENT */}
+        {/* ====================================================
+            USER MANAGEMENT
+        ==================================================== */}
 
         {page ===
           "user-create" && (
@@ -198,19 +314,34 @@ export default function App() {
           <DeactivateUser />
         )}
 
-        {/* CREATE REGION */}
+        {/* ====================================================
+            REGION MANAGEMENT
+        ==================================================== */}
+
+        {/* CREATE REGION
+            Success ->
+            CREATE FIELDS
+        */}
 
         {page ===
-  "region-create" && (
-  <CreateRegion />
-)}
-        {/* CREATE FIELD */}
+          "region-create" && (
+          <CreateRegion
+            onGoToCreateFields={
+              handleGoToCreateFields
+            }
+          />
+        )}
+
+        {/* CREATE FIELDS
+            Success ->
+            UPLOAD CROP DETAILS
+        */}
 
         {page ===
           "field-create" && (
-          <CreateField
+          <CreateFields
             onGoToCropDetails={
-              handleGoToCropDetails
+              handleRegionCreated
             }
           />
         )}
@@ -239,53 +370,52 @@ export default function App() {
           "region-disable-monitoring" && (
           <DisableMonitoring />
         )}
-
       </AdminLayout>
     );
   }
 
-  // ============================================================
-  // NORMAL USER
-  // ============================================================
+  // ==========================================================
+  // NORMAL USER / SCIENTIST
+  // ==========================================================
 
   return (
     <Layout
-      setPage={setPage}
-      logout={handleLogout}
-      user={user}
+      setPage={
+        setPage
+      }
+      logout={
+        handleLogout
+      }
+      user={
+        user
+      }
     >
-
       {page ===
         "dashboard" && (
         <Dashboard />
       )}
 
       {page ===
-        "soil" && (
+        "soil-health" && (
         <SoilHealth />
       )}
 
       {page ===
-        "crop" && (
+        "crop-health" && (
         <CropHealth />
       )}
 
       {page ===
-        "rec" && (
+        "recommendations" && (
         <Recommendations />
       )}
 
       {page ===
-        "rec-input" &&
-        [
-          "scientist",
-          "admin"
-        ].includes(
-          user.role
-        ) && (
-          <AddRecommendation />
-        )}
-
+        "add-recommendation" && (
+        <AddRecommendation />
+      )}
     </Layout>
   );
 }
+
+export default App;

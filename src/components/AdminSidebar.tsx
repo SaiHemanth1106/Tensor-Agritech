@@ -13,11 +13,14 @@ import AddLocationAltIcon from "@mui/icons-material/AddLocationAlt";
 import ListAltIcon from "@mui/icons-material/ListAlt";
 import ToggleOffIcon from "@mui/icons-material/ToggleOff";
 import DashboardIcon from "@mui/icons-material/Dashboard";
+import MapIcon from "@mui/icons-material/Map";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function AdminSidebar({ setPage }: any) {
+
   const [collapsed, setCollapsed] = useState(false);
+
   const [active, setActive] = useState("admin-dashboard");
 
   const user = JSON.parse(
@@ -35,6 +38,7 @@ export default function AdminSidebar({ setPage }: any) {
         }
       ]
     },
+
     {
       section: "Organization",
       items: [
@@ -50,6 +54,7 @@ export default function AdminSidebar({ setPage }: any) {
         }
       ]
     },
+
     {
       section: "User Management",
       items: [
@@ -65,6 +70,7 @@ export default function AdminSidebar({ setPage }: any) {
         }
       ]
     },
+
     {
       section: "Region Management",
       items: [
@@ -73,21 +79,25 @@ export default function AdminSidebar({ setPage }: any) {
           icon: <AddLocationAltIcon />,
           key: "region-create"
         },
+
         {
-          label: "Create Field",
-          icon: <AddLocationAltIcon />,
+          label: "Create Fields",
+          icon: <MapIcon />,
           key: "field-create"
         },
+
         {
           label: "View Regions",
           icon: <ListAltIcon />,
           key: "region-management"
         },
+
         {
           label: "Upload Crop Details",
           icon: <ListAltIcon />,
           key: "region-upload-crop-details"
         },
+
         {
           label: "Disable Monitoring",
           icon: <ToggleOffIcon />,
@@ -97,10 +107,9 @@ export default function AdminSidebar({ setPage }: any) {
     }
   ];
 
-  const handleNavigate = (key: string) => {
-    setActive(key);
-    setPage(key);
-  };
+  useEffect(() => {
+    setPage(active);
+  }, [active]);
 
   return (
     <Box
@@ -116,20 +125,33 @@ export default function AdminSidebar({ setPage }: any) {
         boxShadow: "2px 0px 8px rgba(0,0,0,0.2)"
       }}
     >
+
+      {/* TOP */}
+
       <Box p={1}>
+
         <IconButton
-          onClick={() => setCollapsed(!collapsed)}
-          sx={{ color: "white", mb: 2 }}
+          onClick={() =>
+            setCollapsed(!collapsed)
+          }
+          sx={{
+            color: "white",
+            mb: 2
+          }}
         >
           <MenuIcon />
         </IconButton>
 
         {!collapsed && (
-          <Box textAlign="center" mb={2}>
+          <Box
+            textAlign="center"
+            mb={2}
+          >
             <img
               src="/logo.png"
-              alt="Tensor AgriTech"
-              style={{ width: "140px" }}
+              style={{
+                width: "140px"
+              }}
             />
           </Box>
         )}
@@ -138,79 +160,114 @@ export default function AdminSidebar({ setPage }: any) {
           <Typography
             textAlign="center"
             mb={2}
-            sx={{ opacity: 0.85 }}
+            sx={{
+              opacity: 0.85
+            }}
           >
             👤 {user?.username || "Admin"}
           </Typography>
         )}
 
-        {adminMenu.map((section) => (
-          <Box key={section.section} mb={1}>
-            {!collapsed && (
-              <Typography
-                variant="caption"
-                sx={{
-                  ml: 1,
-                  mb: 1,
-                  display: "block",
-                  opacity: 0.7
-                }}
-              >
-                {section.section}
-              </Typography>
-            )}
+        {/* MENU */}
 
-            {section.items.map((item) => (
-              <Tooltip
-                key={item.key}
-                title={collapsed ? item.label : ""}
-                placement="right"
-              >
-                <Box
-                  onClick={() => handleNavigate(item.key)}
+        {adminMenu.map(
+          (section) => (
+            <Box
+              key={section.section}
+              mb={1}
+            >
+
+              {!collapsed && (
+                <Typography
+                  variant="caption"
                   sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    cursor: "pointer",
-                    px: collapsed ? 1 : 2,
-                    py: 1.2,
-                    borderRadius: 2,
-                    backgroundColor:
-                      active === item.key
-                        ? "#40916C"
-                        : "transparent",
-                    "&:hover": {
-                      backgroundColor: "#2D6A4F"
-                    }
+                    ml: 1,
+                    mb: 1,
+                    display: "block",
+                    opacity: 0.7
                   }}
                 >
-                  <Box width={30}>
-                    {item.icon}
-                  </Box>
+                  {section.section}
+                </Typography>
+              )}
 
-                  {!collapsed && (
-                    <Typography
+              {section.items.map(
+                (item) => (
+                  <Tooltip
+                    key={item.key}
+                    title={
+                      collapsed
+                        ? item.label
+                        : ""
+                    }
+                    placement="right"
+                  >
+                    <Box
+                      onClick={() =>
+                        setActive(
+                          item.key
+                        )
+                      }
                       sx={{
-                        ml: 2,
-                        fontSize: "14px"
+                        display: "flex",
+                        alignItems: "center",
+                        cursor: "pointer",
+
+                        px:
+                          collapsed
+                            ? 1
+                            : 2,
+
+                        py: 1.2,
+
+                        borderRadius: 2,
+
+                        backgroundColor:
+                          active === item.key
+                            ? "#40916C"
+                            : "transparent",
+
+                        "&:hover": {
+                          backgroundColor:
+                            "#2D6A4F"
+                        }
                       }}
                     >
-                      {item.label}
-                    </Typography>
-                  )}
-                </Box>
-              </Tooltip>
-            ))}
+                      <Box width={30}>
+                        {item.icon}
+                      </Box>
 
-            <Divider
-              sx={{
-                my: 1,
-                bgcolor: "rgba(255,255,255,0.2)"
-              }}
-            />
-          </Box>
-        ))}
+                      {!collapsed && (
+                        <Typography
+                          sx={{
+                            ml: 2,
+                            fontSize: "14px"
+                          }}
+                        >
+                          {item.label}
+                        </Typography>
+                      )}
+
+                    </Box>
+                  </Tooltip>
+                )
+              )}
+
+              <Divider
+                sx={{
+                  my: 1,
+                  bgcolor:
+                    "rgba(255,255,255,0.2)"
+                }}
+              />
+
+            </Box>
+          )
+        )}
+
       </Box>
+
+      {/* FOOTER */}
 
       {!collapsed && (
         <Typography
@@ -223,6 +280,7 @@ export default function AdminSidebar({ setPage }: any) {
           © 2026 Tensor AgriTech Pvt. Ltd.
         </Typography>
       )}
+
     </Box>
   );
 }
