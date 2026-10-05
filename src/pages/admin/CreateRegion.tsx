@@ -58,81 +58,9 @@ interface CreateRegionResponse {
 // INITIAL FORM
 // ============================================================
 
-const countries = ["India", "Peru"] as const;
-
-const statesByCountry: Record<string, string[]> = {
-  India: [
-    "Andhra Pradesh",
-    "Arunachal Pradesh",
-    "Assam",
-    "Bihar",
-    "Chhattisgarh",
-    "Goa",
-    "Gujarat",
-    "Haryana",
-    "Himachal Pradesh",
-    "Jharkhand",
-    "Karnataka",
-    "Kerala",
-    "Madhya Pradesh",
-    "Maharashtra",
-    "Manipur",
-    "Meghalaya",
-    "Mizoram",
-    "Nagaland",
-    "Odisha",
-    "Punjab",
-    "Rajasthan",
-    "Sikkim",
-    "Tamil Nadu",
-    "Telangana",
-    "Tripura",
-    "Uttar Pradesh",
-    "Uttarakhand",
-    "West Bengal",
-    "Andaman and Nicobar Islands",
-    "Chandigarh",
-    "Dadra and Nagar Haveli and Daman and Diu",
-    "Delhi",
-    "Jammu and Kashmir",
-    "Ladakh",
-    "Lakshadweep",
-    "Puducherry",
-  ],
-  Peru: [
-    "Amazonas",
-    "Ancash",
-    "Apurimac",
-    "Arequipa",
-    "Ayacucho",
-    "Cajamarca",
-    "Callao",
-    "Cusco",
-    "Huancavelica",
-    "Huanuco",
-    "Ica",
-    "Junin",
-    "La Libertad",
-    "Lambayeque",
-    "Lima",
-    "Loreto",
-    "Madre de Dios",
-    "Moquegua",
-    "Pasco",
-    "Piura",
-    "Puno",
-    "San Martin",
-    "Tacna",
-    "Tumbes",
-    "Ucayali",
-  ],
-};
-
 const initialForm = {
   organizationId: "",
   name: "",
-  country: "",
-  state: "",
   description: "",
   area: "",
 };
@@ -421,10 +349,6 @@ export default function CreateRegion() {
 
           name: form.name.trim(),
 
-          country: form.country,
-
-          state: form.state,
-
           description:
             form.description.trim(),
 
@@ -621,82 +545,6 @@ export default function CreateRegion() {
             )
           }
         />
-
-        {/* COUNTRY */}
-
-        <FormControl
-          fullWidth
-          required
-          sx={{ mb: 2 }}
-          disabled={submitting}
-        >
-          <InputLabel>
-            Country
-          </InputLabel>
-
-          <Select
-            value={form.country}
-            label="Country"
-            onChange={(event) => {
-              updateField(
-                "country",
-                event.target.value
-              );
-
-              updateField(
-                "state",
-                ""
-              );
-            }}
-          >
-            {countries.map((country) => (
-              <MenuItem
-                key={country}
-                value={country}
-              >
-                {country}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* STATE */}
-
-        <FormControl
-          fullWidth
-          required
-          sx={{ mb: 2 }}
-          disabled={
-            submitting ||
-            !form.country
-          }
-        >
-          <InputLabel>
-            State
-          </InputLabel>
-
-          <Select
-            value={form.state}
-            label="State"
-            onChange={(event) =>
-              updateField(
-                "state",
-                event.target.value
-              )
-            }
-          >
-            {(statesByCountry[
-              form.country
-            ] ?? []).map((state) => (
-              <MenuItem
-                key={state}
-                value={state}
-              >
-                {state}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
 
         {/* DESCRIPTION */}
 
