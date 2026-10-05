@@ -385,16 +385,34 @@ export default function CreateRegion() {
           </Select>
         </FormControl>
 
-        <CountryStateSelector
-          country={form.country}
-          state={form.state}
+        <TextField
+          fullWidth
+          required
+          label="Country"
+          value={form.country}
           disabled={submitting}
-          onCountryChange={(value) =>
-            updateField("country", value)
+          onChange={(event) =>
+            updateField(
+              "country",
+              event.target.value
+            )
           }
-          onStateChange={(value) =>
-            updateField("state", value)
+          sx={{ mb: 2 }}
+        />
+
+        <TextField
+          fullWidth
+          required
+          label="State"
+          value={form.state}
+          disabled={submitting}
+          onChange={(event) =>
+            updateField(
+              "state",
+              event.target.value
+            )
           }
+          sx={{ mb: 2 }}
         />
 
         <TextField
