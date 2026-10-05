@@ -92,8 +92,6 @@ export const getRegions = () =>
 export interface CreateRegionPayload {
   organization_id: number;
   name: string;
-  country: string;
-  state: string;
   description: string;
   region_area: number;
   kml_file_name: string;
