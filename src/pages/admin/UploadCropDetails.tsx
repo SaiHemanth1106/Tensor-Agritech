@@ -47,6 +47,7 @@ import * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import type {
+  Feature,
   FeatureCollection,
   GeoJsonObject,
 } from "geojson";
@@ -56,131 +57,107 @@ import * as XLSX from "xlsx";
 import {
   getRegions,
   uploadCropDetailsExcel,
+  getCropMappingStatus,
+  mapCropToField,
+  completeCropMapping,
 } from "../../services/regionApi";
 
 // ============================================================
 // TYPES
 // ============================================================
 
-type Region =
-  Record<string, any>;
+type Region = Record<string, any>;
 
 interface UploadCropDetailsProps {
-  onComplete?: (
-    regionName: string
-  ) => void;
+  onComplete?: (regionName: string) => void;
 }
+
+type MappingStatus = "Pending" | "Mapped";
 
 interface CropRow {
   id: string;
 
-  excelRowNumber:
-    number;
+  excelRowNumber: number;
 
-  cropId?:
-    string | number;
+  cropId?: string;
 
-  fieldId:
-    string;
+  fieldId: string;
 
-  cropType:
-    string;
+  cropType: string;
 
-  season:
-    string;
+  season: string;
 
-  farmerName:
-    string;
+  farmerName: string;
 
-  sowingDate:
-    string;
+  sowingDate: string;
 
-  expectedHarvestDate:
-    string;
+  expectedHarvestDate: string;
 
-  expectedYield:
-    string;
+  expectedYield: string;
 
-  area:
-    string;
+  area: string;
 
-  mappingStatus:
-    "Pending" | "Mapped";
+  mappingStatus: MappingStatus;
 
-  raw:
-    Record<string, any>;
+  raw: Record<string, any>;
 }
 
 interface SelectedPolygon {
-  fieldId:
-    string;
+  tempFieldId: string;
 
-  label:
-    string;
+  geometryReferenceId: string;
 
-  properties:
-    Record<string, any>;
+  label: string;
+
+  properties: Record<string, any>;
 }
 
 interface PendingRegion {
-  regionId:
-    string;
+  regionId: string;
 
-  regionName:
-    string;
+  regionName: string;
 
-  organizationId?:
-    string;
+  organizationId?: string;
 
-  country?:
-    string;
+  country?: string;
 
-  state?:
-    string;
+  state?: string;
 }
 
 interface StoredSession {
-  regionId:
-    string;
+  regionId: string;
 
-  fileName:
-    string;
+  fileName: string;
 
-  uploaded:
-    boolean;
+  uploaded: boolean;
 
-  rows:
-    CropRow[];
+  rows: CropRow[];
 }
 
 // ============================================================
-// REGION HELPERS
+// HELPERS
 // ============================================================
+
+const toMappingStatus = (
+  value: unknown
+): MappingStatus => {
+  return String(value).toLowerCase() === "mapped"
+    ? "Mapped"
+    : "Pending";
+};
 
 const getRegionList = (
   response: any
 ): Region[] => {
-  if (
-    Array.isArray(
-      response
-    )
-  ) {
+  if (Array.isArray(response)) {
     return response;
   }
 
-  if (
-    Array.isArray(
-      response?.regions
-    )
-  ) {
+  if (Array.isArray(response?.regions)) {
     return response.regions;
   }
 
-  if (
-    Array.isArray(
-      response?.data
-    )
-  ) {
+  if (Array.isArray(response?.data)) {
     return response.data;
   }
 
@@ -189,27 +166,35 @@ const getRegionList = (
 
 const getRegionId = (
   region: Region
-) =>
-  String(
+): string => {
+  return String(
     region?.region_id ??
       region?.id ??
       region?.regionId ??
       ""
   );
+};
 
 const getRegionName = (
   region: Region
-) =>
-  String(
+): string => {
+  return String(
     region?.name ??
       region?.region_name ??
       region?.regionName ??
       ""
   );
+};
 
 // ============================================================
-// PENDING REGION
+// LOCAL STORAGE
 // ============================================================
+
+const sessionKey = (
+  regionId: string
+): string => {
+  return `cropMappingSession:${regionId}`;
+};
 
 const readPendingRegion =
   (): PendingRegion | null => {
@@ -226,46 +211,255 @@ const readPendingRegion =
       const parsed =
         JSON.parse(value);
 
-      if (
-        !parsed?.regionId
-      ) {
+      if (!parsed?.regionId) {
         return null;
       }
 
       return {
-        regionId:
-          String(
-            parsed.regionId
-          ),
+        regionId: String(
+          parsed.regionId
+        ),
 
-        regionName:
-          String(
-            parsed.regionName ??
-              ""
-          ),
+        regionName: String(
+          parsed.regionName ?? ""
+        ),
 
         organizationId:
-          String(
-            parsed.organizationId ??
-              ""
-          ),
+          parsed.organizationId
+            ? String(
+                parsed.organizationId
+              )
+            : undefined,
 
         country:
-          String(
-            parsed.country ??
-              ""
-          ),
+          parsed.country
+            ? String(
+                parsed.country
+              )
+            : undefined,
 
         state:
-          String(
-            parsed.state ??
-              ""
-          ),
+          parsed.state
+            ? String(
+                parsed.state
+              )
+            : undefined,
       };
     } catch {
       return null;
     }
   };
+
+const saveSession = (
+  data: StoredSession
+): void => {
+  localStorage.setItem(
+    sessionKey(
+      data.regionId
+    ),
+    JSON.stringify(data)
+  );
+};
+
+const readSession = (
+  regionId: string
+): StoredSession | null => {
+  try {
+    const value =
+      localStorage.getItem(
+        sessionKey(regionId)
+      );
+
+    if (!value) {
+      return null;
+    }
+
+    const parsed =
+      JSON.parse(value);
+
+    if (
+      !parsed ||
+      !Array.isArray(parsed.rows)
+    ) {
+      return null;
+    }
+
+    return {
+      regionId: String(
+        parsed.regionId ?? regionId
+      ),
+
+      fileName: String(
+        parsed.fileName ?? ""
+      ),
+
+      uploaded: Boolean(
+        parsed.uploaded
+      ),
+
+      rows: parsed.rows.map(
+        (row: any): CropRow => ({
+          id: String(
+            row.id ?? ""
+          ),
+
+          excelRowNumber:
+            Number(
+              row.excelRowNumber ?? 0
+            ),
+
+          cropId:
+            row.cropId != null
+              ? String(row.cropId)
+              : undefined,
+
+          fieldId: String(
+            row.fieldId ?? ""
+          ),
+
+          cropType: String(
+            row.cropType ?? ""
+          ),
+
+          season: String(
+            row.season ?? ""
+          ),
+
+          farmerName: String(
+            row.farmerName ?? ""
+          ),
+
+          sowingDate: String(
+            row.sowingDate ?? ""
+          ),
+
+          expectedHarvestDate:
+            String(
+              row.expectedHarvestDate ??
+                ""
+            ),
+
+          expectedYield: String(
+            row.expectedYield ?? ""
+          ),
+
+          area: String(
+            row.area ?? ""
+          ),
+
+          mappingStatus:
+            toMappingStatus(
+              row.mappingStatus
+            ),
+
+          raw:
+            row.raw ?? {},
+        })
+      ),
+    };
+  } catch {
+    return null;
+  }
+};
+
+// ============================================================
+// GEOMETRY
+// ============================================================
+
+const readCachedGeometry = (
+  regionId: string
+): GeoJsonObject | null => {
+  try {
+    const value =
+      localStorage.getItem(
+        `regionGeometry:${regionId}`
+      );
+
+    if (!value) {
+      return null;
+    }
+
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const buildGeometryCollection = (
+  geometries: any[]
+): FeatureCollection => {
+  return {
+    type: "FeatureCollection",
+
+    features: geometries
+      .filter(
+        (item) =>
+          item?.geometry
+      )
+      .map(
+        (item): Feature => ({
+          type: "Feature",
+
+          properties: {
+            temp_field_id:
+              item.temp_field_id,
+
+            geometry_reference_id:
+              item.geometry_reference_id,
+
+            country:
+              item.country,
+
+            state:
+              item.state,
+          },
+
+          geometry:
+            item.geometry,
+        })
+      ),
+  };
+};
+
+// ============================================================
+// MAP FIT
+// ============================================================
+
+function FitMap({
+  geometry,
+}: {
+  geometry: GeoJsonObject;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    try {
+      const bounds =
+        L.geoJSON(
+          geometry
+        ).getBounds();
+
+      if (bounds.isValid()) {
+        map.fitBounds(
+          bounds,
+          {
+            padding: [
+              20,
+              20,
+            ],
+          }
+        );
+      }
+    } catch {
+      // Ignore invalid geometry
+    }
+  }, [
+    geometry,
+    map,
+  ]);
+
+  return null;
+}
 
 // ============================================================
 // EXCEL HELPERS
@@ -273,31 +467,27 @@ const readPendingRegion =
 
 const normalizeKey = (
   value: string
-) =>
-  value
+): string => {
+  return value
     .trim()
     .toLowerCase()
     .replace(
       /[\s_-]+/g,
       ""
     );
+};
 
 const getValue = (
-  row:
-    Record<string, any>,
-
-  aliases:
-    string[]
-) => {
+  row: Record<string, any>,
+  aliases: string[]
+): string => {
   const normalized =
     new Map<
       string,
       any
     >();
 
-  Object.entries(
-    row
-  ).forEach(
+  Object.entries(row).forEach(
     ([key, value]) => {
       normalized.set(
         normalizeKey(key),
@@ -311,22 +501,15 @@ const getValue = (
   ) {
     const value =
       normalized.get(
-        normalizeKey(
-          alias
-        )
+        normalizeKey(alias)
       );
 
     if (
-      value !==
-        undefined &&
+      value !== undefined &&
       value !== null &&
-      String(
-        value
-      ).trim() !== ""
+      String(value).trim() !== ""
     ) {
-      return String(
-        value
-      );
+      return String(value);
     }
   }
 
@@ -334,23 +517,19 @@ const getValue = (
 };
 
 const makeCropRow = (
-  row:
-    Record<string, any>,
-
-  index:
-    number
+  row: Record<string, any>,
+  index: number
 ): CropRow => {
   return {
-    id:
-      `row-${
-        index + 2
-      }`,
+    id: `row-${index + 2}`,
 
     excelRowNumber:
       index + 2,
 
-    fieldId:
-      "",
+    cropId:
+      undefined,
+
+    fieldId: "",
 
     cropType:
       getValue(
@@ -423,186 +602,70 @@ const makeCropRow = (
     mappingStatus:
       "Pending",
 
-    raw:
-      row,
+    raw: row,
   };
 };
 
 const fileToBase64 = (
   file: File
-): Promise<string> =>
-  new Promise(
-    (resolve, reject) => {
+): Promise<string> => {
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
       const reader =
         new FileReader();
 
-      reader.onload =
-        () => {
-          if (
-            typeof reader.result !==
-            "string"
-          ) {
-            reject(
-              new Error(
-                "Unable to read Excel file."
-              )
-            );
-
-            return;
-          }
-
-          const result =
-            reader.result;
-
-          const base64 =
-            result.includes(",")
-              ? result.split(
-                  ","
-                )[1]
-              : result;
-
-          if (!base64) {
-            reject(
-              new Error(
-                "Invalid Excel file."
-              )
-            );
-
-            return;
-          }
-
-          resolve(
-            base64
-          );
-        };
-
-      reader.onerror =
-        () =>
+      reader.onload = () => {
+        if (
+          typeof reader.result !==
+          "string"
+        ) {
           reject(
             new Error(
               "Unable to read Excel file."
             )
           );
 
+          return;
+        }
+
+        const result =
+          reader.result;
+
+        const base64 =
+          result.includes(",")
+            ? result.split(",")[1]
+            : result;
+
+        if (!base64) {
+          reject(
+            new Error(
+              "Invalid Excel file."
+            )
+          );
+
+          return;
+        }
+
+        resolve(base64);
+      };
+
+      reader.onerror = () => {
+        reject(
+          new Error(
+            "Unable to read Excel file."
+          )
+        );
+      };
+
       reader.readAsDataURL(
         file
       );
     }
   );
-
-// ============================================================
-// LOCAL SESSION
-// ============================================================
-
-const sessionKey = (
-  regionId: string
-) =>
-  `cropMappingSession:${regionId}`;
-
-const saveSession = (
-  data:
-    StoredSession
-) => {
-  localStorage.setItem(
-    sessionKey(
-      data.regionId
-    ),
-
-    JSON.stringify(
-      data
-    )
-  );
 };
-
-const readSession = (
-  regionId: string
-):
-  StoredSession | null => {
-  try {
-    const value =
-      localStorage.getItem(
-        sessionKey(
-          regionId
-        )
-      );
-
-    if (!value) {
-      return null;
-    }
-
-    return JSON.parse(
-      value
-    );
-  } catch {
-    return null;
-  }
-};
-
-// ============================================================
-// GEOMETRY
-// ============================================================
-
-const readGeometry = (
-  regionId: string
-):
-  GeoJsonObject | null => {
-  try {
-    const value =
-      localStorage.getItem(
-        `regionGeometry:${regionId}`
-      );
-
-    if (!value) {
-      return null;
-    }
-
-    return JSON.parse(
-      value
-    );
-  } catch {
-    return null;
-  }
-};
-
-function FitMap({
-  geometry,
-}: {
-  geometry:
-    GeoJsonObject;
-}) {
-  const map =
-    useMap();
-
-  useEffect(() => {
-    try {
-      const bounds =
-        L.geoJSON(
-          geometry
-        ).getBounds();
-
-      if (
-        bounds.isValid()
-      ) {
-        map.fitBounds(
-          bounds,
-          {
-            padding: [
-              20,
-              20,
-            ],
-          }
-        );
-      }
-    } catch {
-      // ignore
-    }
-  }, [
-    geometry,
-    map,
-  ]);
-
-  return null;
-}
 
 // ============================================================
 // COMPONENT
@@ -611,6 +674,10 @@ function FitMap({
 export default function UploadCropDetails({
   onComplete,
 }: UploadCropDetailsProps) {
+  // ----------------------------------------------------------
+  // REGIONS
+  // ----------------------------------------------------------
+
   const [
     regions,
     setRegions,
@@ -621,11 +688,14 @@ export default function UploadCropDetails({
     setSelectedRegionId,
   ] = useState("");
 
+  // ----------------------------------------------------------
+  // ROWS
+  // ----------------------------------------------------------
+
   const [
     rows,
     setRows,
-  ] =
-    useState<CropRow[]>([]);
+  ] = useState<CropRow[]>([]);
 
   const [
     fileName,
@@ -635,15 +705,18 @@ export default function UploadCropDetails({
   const [
     fileContent,
     setFileContent,
-  ] =
-    useState<string | null>(
-      null
-    );
+  ] = useState<
+    string | null
+  >(null);
 
   const [
     uploaded,
     setUploaded,
   ] = useState(false);
+
+  // ----------------------------------------------------------
+  // LOADING
+  // ----------------------------------------------------------
 
   const [
     loading,
@@ -656,6 +729,20 @@ export default function UploadCropDetails({
   ] = useState(false);
 
   const [
+    statusLoading,
+    setStatusLoading,
+  ] = useState(false);
+
+  const [
+    mappingLoading,
+    setMappingLoading,
+  ] = useState(false);
+
+  // ----------------------------------------------------------
+  // MESSAGES
+  // ----------------------------------------------------------
+
+  const [
     error,
     setError,
   ] = useState("");
@@ -665,21 +752,34 @@ export default function UploadCropDetails({
     setSuccess,
   ] = useState("");
 
+  // ----------------------------------------------------------
+  // MAP
+  // ----------------------------------------------------------
+
   const [
     mappingRow,
     setMappingRow,
-  ] =
-    useState<CropRow | null>(
-      null
-    );
+  ] = useState<
+    CropRow | null
+  >(null);
 
   const [
     selectedPolygon,
     setSelectedPolygon,
-  ] =
-    useState<SelectedPolygon | null>(
-      null
-    );
+  ] = useState<
+    SelectedPolygon | null
+  >(null);
+
+  const [
+    geometry,
+    setGeometry,
+  ] = useState<
+    GeoJsonObject | null
+  >(null);
+
+  // ----------------------------------------------------------
+  // PAGINATION
+  // ----------------------------------------------------------
 
   const [
     page,
@@ -691,12 +791,12 @@ export default function UploadCropDetails({
     setRowsPerPage,
   ] = useState(20);
 
-  // ============================================================
+  // ==========================================================
   // LOAD REGIONS
-  // ============================================================
+  // ==========================================================
 
   useEffect(() => {
-    const load =
+    const loadRegions =
       async () => {
         setLoading(true);
 
@@ -711,12 +811,6 @@ export default function UploadCropDetails({
             getRegionList(
               response
             );
-
-          // ----------------------------------------------------
-          // VERY IMPORTANT:
-          // Add latest Create Field region even if GET /regions
-          // does not contain it yet.
-          // ----------------------------------------------------
 
           if (pending) {
             const exists =
@@ -755,9 +849,7 @@ export default function UploadCropDetails({
             }
           }
 
-          setRegions(
-            list
-          );
+          setRegions(list);
 
           if (
             pending?.regionId
@@ -775,11 +867,6 @@ export default function UploadCropDetails({
             );
           }
         } catch (err) {
-          // ----------------------------------------------------
-          // Even if GET /regions fails,
-          // allow latest field-created region.
-          // ----------------------------------------------------
-
           if (pending) {
             setRegions([
               {
@@ -806,8 +893,6 @@ export default function UploadCropDetails({
             setSelectedRegionId(
               pending.regionId
             );
-
-            setError("");
           } else {
             setError(
               err instanceof Error
@@ -816,23 +901,19 @@ export default function UploadCropDetails({
             );
           }
         } finally {
-          setLoading(
-            false
-          );
+          setLoading(false);
         }
       };
 
-    void load();
+    void loadRegions();
   }, []);
 
-  // ============================================================
-  // LOAD SESSION
-  // ============================================================
+  // ==========================================================
+  // LOAD LOCAL SESSION
+  // ==========================================================
 
   useEffect(() => {
-    if (
-      !selectedRegionId
-    ) {
+    if (!selectedRegionId) {
       return;
     }
 
@@ -843,19 +924,15 @@ export default function UploadCropDetails({
 
     if (session) {
       setRows(
-        session.rows ??
-          []
+        session.rows
       );
 
       setFileName(
-        session.fileName ??
-          ""
+        session.fileName
       );
 
       setUploaded(
-        Boolean(
-          session.uploaded
-        )
+        session.uploaded
       );
     } else {
       setRows([]);
@@ -865,16 +942,287 @@ export default function UploadCropDetails({
 
     setFileContent(null);
     setPage(0);
-
     setError("");
     setSuccess("");
   }, [
     selectedRegionId,
   ]);
 
-  // ============================================================
+  // ==========================================================
+  // LOAD DATABASE STATUS
+  // ==========================================================
+
+  useEffect(() => {
+    if (!selectedRegionId) {
+      return;
+    }
+
+    const loadStatus =
+      async () => {
+        setStatusLoading(true);
+
+        try {
+          const result =
+            await getCropMappingStatus(
+              selectedRegionId
+            );
+
+          if (
+            !result?.success
+          ) {
+            throw new Error(
+              "Unable to load crop mapping status."
+            );
+          }
+
+          // ----------------------------------------------
+          // DATABASE IS SOURCE OF TRUTH
+          // ----------------------------------------------
+
+          const dbRows =
+            Array.isArray(
+              result.crops
+            )
+              ? result.crops
+              : [];
+
+          const existingRows =
+            readSession(
+              selectedRegionId
+            )?.rows ?? rows;
+
+          const existingByCropId =
+            new Map<
+              string,
+              CropRow
+            >();
+
+          existingRows.forEach(
+            (row) => {
+              if (row.cropId) {
+                existingByCropId.set(
+                  String(
+                    row.cropId
+                  ),
+                  row
+                );
+              }
+            }
+          );
+
+          const nextRows: CropRow[] =
+            dbRows.map(
+              (
+                crop: any,
+                index: number
+              ): CropRow => {
+                const cropId =
+                  String(
+                    crop.crop_id
+                  );
+
+                const existing =
+                  existingByCropId.get(
+                    cropId
+                  );
+
+                return {
+                  id:
+                    existing?.id ??
+                    `db-row-${index + 2}`,
+
+                  excelRowNumber:
+                    existing
+                      ?.excelRowNumber ??
+                    index + 2,
+
+                  cropId,
+
+                  fieldId:
+                    crop.field_id !=
+                    null
+                      ? String(
+                          crop.field_id
+                        )
+                      : "",
+
+                  cropType:
+                    String(
+                      crop.crop_name ??
+                        crop.crop_type ??
+                        existing?.cropType ??
+                        ""
+                    ),
+
+                  season:
+                    String(
+                      crop.season ??
+                        existing?.season ??
+                        ""
+                    ),
+
+                  farmerName:
+                    String(
+                      crop.farmer_name ??
+                        existing?.farmerName ??
+                        ""
+                    ),
+
+                  sowingDate:
+                    String(
+                      crop.sowing_date ??
+                        existing?.sowingDate ??
+                        ""
+                    ),
+
+                  expectedHarvestDate:
+                    String(
+                      crop.expected_harvest_date ??
+                        existing?.expectedHarvestDate ??
+                        ""
+                    ),
+
+                  expectedYield:
+                    crop.expected_yield !=
+                    null
+                      ? String(
+                          crop.expected_yield
+                        )
+                      : existing?.expectedYield ??
+                        "",
+
+                  area:
+                    crop.area !=
+                    null
+                      ? String(
+                          crop.area
+                        )
+                      : existing?.area ??
+                        "",
+
+                  mappingStatus:
+                    toMappingStatus(
+                      crop.mapping_status ??
+                        (crop.field_id !=
+                        null
+                          ? "Mapped"
+                          : "Pending")
+                    ),
+
+                  raw:
+                    existing?.raw ??
+                    crop,
+                };
+              }
+            );
+
+          setRows(
+            nextRows
+          );
+
+          setUploaded(
+            dbRows.length > 0
+          );
+
+          // ----------------------------------------------
+          // SAVE DB STATE TO LOCAL CACHE
+          // ----------------------------------------------
+
+          if (
+            dbRows.length > 0
+          ) {
+            const session =
+              readSession(
+                selectedRegionId
+              );
+
+            saveSession({
+              regionId:
+                selectedRegionId,
+
+              fileName:
+                session?.fileName ??
+                "",
+
+              uploaded: true,
+
+              rows:
+                nextRows,
+            });
+          }
+
+          // ----------------------------------------------
+          // GEOMETRY
+          // ----------------------------------------------
+
+          if (
+            Array.isArray(
+              result.geometries
+            ) &&
+            result.geometries.length >
+              0
+          ) {
+            const collection =
+              buildGeometryCollection(
+                result.geometries
+              );
+
+            setGeometry(
+              collection
+            );
+
+            localStorage.setItem(
+              `regionGeometry:${selectedRegionId}`,
+              JSON.stringify(
+                collection
+              )
+            );
+          } else {
+            const cached =
+              readCachedGeometry(
+                selectedRegionId
+              );
+
+            setGeometry(
+              cached
+            );
+          }
+        } catch (err) {
+          console.error(
+            "MAPPING STATUS ERROR:",
+            err
+          );
+
+          // Backend unavailable:
+          // fall back to local cache.
+
+          const cached =
+            readCachedGeometry(
+              selectedRegionId
+            );
+
+          setGeometry(
+            cached
+          );
+        } finally {
+          setStatusLoading(false);
+        }
+      };
+
+    void loadStatus();
+
+    // We intentionally do not put `rows`
+    // in the dependency list.
+    // Otherwise this effect would repeatedly
+    // call the backend whenever a row changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedRegionId,
+  ]);
+
+  // ==========================================================
   // SELECTED REGION
-  // ============================================================
+  // ==========================================================
 
   const selectedRegion =
     useMemo(
@@ -895,30 +1243,16 @@ export default function UploadCropDetails({
 
   const regionName =
     getRegionName(
-      selectedRegion ??
-        {}
+      selectedRegion ?? {}
     );
 
-  const geometry =
-    useMemo(
-      () =>
-        selectedRegionId
-          ? readGeometry(
-              selectedRegionId
-            )
-          : null,
-
-      [selectedRegionId]
-    );
-
-  // ============================================================
+  // ==========================================================
   // SELECT EXCEL
-  // ============================================================
+  // ==========================================================
 
   const handleExcelFile =
     async (
-      event:
-        ChangeEvent<HTMLInputElement>
+      event: ChangeEvent<HTMLInputElement>
     ) => {
       setError("");
       setSuccess("");
@@ -933,16 +1267,13 @@ export default function UploadCropDetails({
       if (
         !file.name
           .toLowerCase()
-          .endsWith(
-            ".xlsx"
-          )
+          .endsWith(".xlsx")
       ) {
         setError(
           "Please upload a valid .xlsx Excel file."
         );
 
-        event.target.value =
-          "";
+        event.target.value = "";
 
         return;
       }
@@ -955,17 +1286,13 @@ export default function UploadCropDetails({
           XLSX.read(
             buffer,
             {
-              type:
-                "array",
-
-              cellDates:
-                true,
+              type: "array",
+              cellDates: true,
             }
           );
 
         if (
-          workbook
-            .SheetNames
+          workbook.SheetNames
             .length === 0
         ) {
           throw new Error(
@@ -984,8 +1311,7 @@ export default function UploadCropDetails({
 
         const sheetName =
           cropsSheet ??
-          workbook
-            .SheetNames[0];
+          workbook.SheetNames[0];
 
         const worksheet =
           workbook.Sheets[
@@ -993,26 +1319,18 @@ export default function UploadCropDetails({
           ];
 
         const rawRows =
-          XLSX.utils
-            .sheet_to_json<
-              Record<
-                string,
-                any
-              >
-            >(
-              worksheet,
-              {
-                defval:
-                  "",
-
-                raw:
-                  false,
-              }
-            );
+          XLSX.utils.sheet_to_json<
+            Record<string, any>
+          >(
+            worksheet,
+            {
+              defval: "",
+              raw: false,
+            }
+          );
 
         if (
-          rawRows.length ===
-          0
+          rawRows.length === 0
         ) {
           throw new Error(
             "Excel contains no crop rows."
@@ -1054,8 +1372,7 @@ export default function UploadCropDetails({
           fileName:
             file.name,
 
-          uploaded:
-            false,
+          uploaded: false,
 
           rows:
             nextRows,
@@ -1067,9 +1384,7 @@ export default function UploadCropDetails({
       } catch (err) {
         setRows([]);
         setFileName("");
-        setFileContent(
-          null
-        );
+        setFileContent(null);
         setUploaded(false);
 
         setError(
@@ -1080,18 +1395,16 @@ export default function UploadCropDetails({
       }
     };
 
-  // ============================================================
+  // ==========================================================
   // UPLOAD EXCEL
-  // ============================================================
+  // ==========================================================
 
   const handleUpload =
     async () => {
       setError("");
       setSuccess("");
 
-      if (
-        !selectedRegionId
-      ) {
+      if (!selectedRegionId) {
         setError(
           "Please select a region."
         );
@@ -1116,7 +1429,6 @@ export default function UploadCropDetails({
         const result =
           await uploadCropDetailsExcel(
             selectedRegionId,
-
             {
               region_id:
                 selectedRegionId,
@@ -1130,8 +1442,7 @@ export default function UploadCropDetails({
           );
 
         if (
-          result?.success ===
-          false
+          result?.success === false
         ) {
           throw new Error(
             result?.details ||
@@ -1146,19 +1457,33 @@ export default function UploadCropDetails({
           result?.rows ??
           [];
 
-        const nextRows =
+        const nextRows: CropRow[] =
           rows.map(
             (
               row,
               index
-            ) => ({
+            ): CropRow => ({
               ...row,
 
               cropId:
                 backendRows[
                   index
-                ]?.crop_id ??
-                row.cropId,
+                ]?.crop_id != null
+                  ? String(
+                      backendRows[
+                        index
+                      ].crop_id
+                    )
+                  : row.cropId,
+
+              fieldId:
+                row.fieldId,
+
+              mappingStatus:
+                row.mappingStatus ===
+                "Mapped"
+                  ? "Mapped"
+                  : "Pending",
             })
           );
 
@@ -1176,8 +1501,7 @@ export default function UploadCropDetails({
 
           fileName,
 
-          uploaded:
-            true,
+          uploaded: true,
 
           rows:
             nextRows,
@@ -1187,6 +1511,146 @@ export default function UploadCropDetails({
           result?.message ||
             `${nextRows.length} crop row(s) uploaded successfully.`
         );
+
+        // Refresh DB status
+        try {
+          const status =
+            await getCropMappingStatus(
+              selectedRegionId
+            );
+
+          if (
+            status?.success
+          ) {
+            const refreshedRows: CropRow[] =
+              (
+                status.crops ??
+                []
+              ).map(
+                (
+                  crop: any,
+                  index: number
+                ): CropRow => {
+                  const existing =
+                    nextRows.find(
+                      (row) =>
+                        row.cropId ===
+                        String(
+                          crop.crop_id
+                        )
+                    );
+
+                  return {
+                    id:
+                      existing?.id ??
+                      `db-row-${index + 2}`,
+
+                    excelRowNumber:
+                      existing?.excelRowNumber ??
+                      index + 2,
+
+                    cropId:
+                      String(
+                        crop.crop_id
+                      ),
+
+                    fieldId:
+                      crop.field_id !=
+                      null
+                        ? String(
+                            crop.field_id
+                          )
+                        : "",
+
+                    cropType:
+                      String(
+                        crop.crop_name ??
+                          crop.crop_type ??
+                          existing?.cropType ??
+                          ""
+                      ),
+
+                    season:
+                      String(
+                        crop.season ??
+                          existing?.season ??
+                          ""
+                      ),
+
+                    farmerName:
+                      String(
+                        crop.farmer_name ??
+                          existing?.farmerName ??
+                          ""
+                      ),
+
+                    sowingDate:
+                      String(
+                        crop.sowing_date ??
+                          existing?.sowingDate ??
+                          ""
+                      ),
+
+                    expectedHarvestDate:
+                      String(
+                        crop.expected_harvest_date ??
+                          existing?.expectedHarvestDate ??
+                          ""
+                      ),
+
+                    expectedYield:
+                      crop.expected_yield !=
+                      null
+                        ? String(
+                            crop.expected_yield
+                          )
+                        : existing?.expectedYield ??
+                          "",
+
+                    area:
+                      crop.area !=
+                      null
+                        ? String(
+                            crop.area
+                          )
+                        : existing?.area ??
+                          "",
+
+                    mappingStatus:
+                      toMappingStatus(
+                        crop.mapping_status ??
+                          (crop.field_id !=
+                          null
+                            ? "Mapped"
+                            : "Pending")
+                      ),
+
+                    raw:
+                      existing?.raw ??
+                      crop,
+                  };
+                }
+              );
+
+            setRows(
+              refreshedRows
+            );
+
+            saveSession({
+              regionId:
+                selectedRegionId,
+
+              fileName,
+
+              uploaded: true,
+
+              rows:
+                refreshedRows,
+            });
+          }
+        } catch {
+          // Upload already succeeded.
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -1194,24 +1658,42 @@ export default function UploadCropDetails({
             : "Crop Excel upload failed."
         );
       } finally {
-        setUploading(
-          false
-        );
+        setUploading(false);
       }
     };
 
-  // ============================================================
+  // ==========================================================
   // OPEN MAP
-  // ============================================================
+  // ==========================================================
 
   const openMap = (
     row: CropRow
   ) => {
     setError("");
+    setSuccess("");
 
     if (!uploaded) {
       setError(
         "First upload the Excel file."
+      );
+
+      return;
+    }
+
+    if (
+      row.mappingStatus ===
+      "Mapped"
+    ) {
+      setError(
+        "This crop is already mapped."
+      );
+
+      return;
+    }
+
+    if (!row.cropId) {
+      setError(
+        "Crop ID is missing. Please upload the Excel file first."
       );
 
       return;
@@ -1225,57 +1707,74 @@ export default function UploadCropDetails({
       return;
     }
 
-    setMappingRow(row);
+    setMappingRow(
+      row
+    );
 
     setSelectedPolygon(
       null
     );
   };
 
-  // ============================================================
-  // SELECT POLYGON
-  // ============================================================
+  // ==========================================================
+  // POLYGON CLICK
+  // ==========================================================
 
-  const handlePolygonClick =
-    (
-      feature: any,
-      index: number
-    ) => {
-      const properties =
-        feature?.properties ??
-        {};
+  const handlePolygonClick = (
+    feature: any
+  ) => {
+    const properties =
+      feature?.properties ??
+      {};
 
-      const fieldId =
+    const tempFieldId =
+      properties.temp_field_id;
+
+    const geometryReferenceId =
+      properties.geometry_reference_id;
+
+    if (!tempFieldId) {
+      setError(
+        "This field does not have a temporary field ID."
+      );
+
+      return;
+    }
+
+    setSelectedPolygon({
+      tempFieldId:
         String(
-          properties
-            .geometry_reference_id ??
-            properties
-              .temp_field_id ??
-            index + 1
-        );
+          tempFieldId
+        ),
 
-      const label =
-        String(
-          properties
-            .field_name ??
-            `Field ${
-              index + 1
-            }`
-        );
+      geometryReferenceId:
+        geometryReferenceId !=
+        null
+          ? String(
+              geometryReferenceId
+            )
+          : "",
 
-      setSelectedPolygon({
-        fieldId,
-        label,
-        properties,
-      });
-    };
+      label:
+        geometryReferenceId !=
+        null
+          ? `Field ${String(
+              geometryReferenceId
+            )}`
+          : `Temporary Field ${String(
+              tempFieldId
+            )}`,
 
-  // ============================================================
-  // CONFIRM LOCAL MAPPING
-  // ============================================================
+      properties,
+    });
+  };
+
+  // ==========================================================
+  // CONFIRM MAPPING
+  // ==========================================================
 
   const confirmMapping =
-    () => {
+    async () => {
       if (
         !mappingRow ||
         !selectedPolygon
@@ -1283,53 +1782,270 @@ export default function UploadCropDetails({
         return;
       }
 
-      const nextRows =
-        rows.map(
-          (row) =>
-            row.id ===
-            mappingRow.id
-              ? {
-                  ...row,
-
-                  fieldId:
-                    selectedPolygon.fieldId,
-
-                  mappingStatus:
-                    "Mapped" as const,
-                }
-              : row
+      if (!mappingRow.cropId) {
+        setError(
+          "Crop ID is missing."
         );
 
-      setRows(
-        nextRows
-      );
+        return;
+      }
 
-      saveSession({
-        regionId:
-          selectedRegionId,
+      setError("");
+      setSuccess("");
+      setMappingLoading(true);
 
-        fileName,
+      try {
+        const result =
+          await mapCropToField({
+            region_id:
+              selectedRegionId,
 
-        uploaded,
+            crop_id:
+              String(
+                mappingRow.cropId
+              ),
 
-        rows:
-          nextRows,
-      });
+            temp_field_id:
+              selectedPolygon.tempFieldId,
+          });
 
-      setSuccess(
-        `Excel row ${mappingRow.excelRowNumber} mapped to ${selectedPolygon.label}.`
-      );
+        if (
+          result?.success === false
+        ) {
+          throw new Error(
+            result?.details ||
+              result?.error ||
+              result?.message ||
+              "Crop mapping failed."
+          );
+        }
 
-      setMappingRow(null);
+        // --------------------------------------------------
+        // Update local row ONLY after backend success
+        // --------------------------------------------------
 
-      setSelectedPolygon(
-        null
-      );
+        const mappedFieldId =
+          result?.field?.field_id !=
+          null
+            ? String(
+                result.field.field_id
+              )
+            : selectedPolygon
+                .geometryReferenceId;
+
+        const nextRows: CropRow[] =
+          rows.map(
+            (
+              row
+            ): CropRow => {
+              if (
+                row.cropId !==
+                String(
+                  mappingRow.cropId
+                )
+              ) {
+                return row;
+              }
+
+              return {
+                ...row,
+
+                fieldId:
+                  mappedFieldId,
+
+                mappingStatus:
+                  "Mapped",
+              };
+            }
+          );
+
+        setRows(
+          nextRows
+        );
+
+        saveSession({
+          regionId:
+            selectedRegionId,
+
+          fileName,
+
+          uploaded: true,
+
+          rows:
+            nextRows,
+        });
+
+        setMappingRow(
+          null
+        );
+
+        setSelectedPolygon(
+          null
+        );
+
+        setSuccess(
+          result?.message ||
+            "Crop mapped to field successfully."
+        );
+
+        // --------------------------------------------------
+        // Refresh from database
+        // --------------------------------------------------
+
+        try {
+          const status =
+            await getCropMappingStatus(
+              selectedRegionId
+            );
+
+          if (
+            status?.success
+          ) {
+            const refreshedRows: CropRow[] =
+              (
+                status.crops ??
+                []
+              ).map(
+                (
+                  crop: any,
+                  index: number
+                ): CropRow => {
+                  const existing =
+                    nextRows.find(
+                      (row) =>
+                        row.cropId ===
+                        String(
+                          crop.crop_id
+                        )
+                    );
+
+                  return {
+                    id:
+                      existing?.id ??
+                      `db-row-${index + 2}`,
+
+                    excelRowNumber:
+                      existing?.excelRowNumber ??
+                      index + 2,
+
+                    cropId:
+                      String(
+                        crop.crop_id
+                      ),
+
+                    fieldId:
+                      crop.field_id !=
+                      null
+                        ? String(
+                            crop.field_id
+                          )
+                        : "",
+
+                    cropType:
+                      String(
+                        crop.crop_name ??
+                          crop.crop_type ??
+                          existing?.cropType ??
+                          ""
+                      ),
+
+                    season:
+                      String(
+                        crop.season ??
+                          existing?.season ??
+                          ""
+                      ),
+
+                    farmerName:
+                      String(
+                        crop.farmer_name ??
+                          existing?.farmerName ??
+                          ""
+                      ),
+
+                    sowingDate:
+                      String(
+                        crop.sowing_date ??
+                          existing?.sowingDate ??
+                          ""
+                      ),
+
+                    expectedHarvestDate:
+                      String(
+                        crop.expected_harvest_date ??
+                          existing?.expectedHarvestDate ??
+                          ""
+                      ),
+
+                    expectedYield:
+                      crop.expected_yield !=
+                      null
+                        ? String(
+                            crop.expected_yield
+                          )
+                        : existing?.expectedYield ??
+                          "",
+
+                    area:
+                      crop.area !=
+                      null
+                        ? String(
+                            crop.area
+                          )
+                        : existing?.area ??
+                          "",
+
+                    mappingStatus:
+                      toMappingStatus(
+                        crop.mapping_status ??
+                          (crop.field_id !=
+                          null
+                            ? "Mapped"
+                            : "Pending")
+                      ),
+
+                    raw:
+                      existing?.raw ??
+                      crop,
+                  };
+                }
+              );
+
+            setRows(
+              refreshedRows
+            );
+
+            saveSession({
+              regionId:
+                selectedRegionId,
+
+              fileName,
+
+              uploaded: true,
+
+              rows:
+                refreshedRows,
+            });
+          }
+        } catch {
+          // Mapping already succeeded.
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Crop mapping failed."
+        );
+      } finally {
+        setMappingLoading(
+          false
+        );
+      }
     };
 
-  // ============================================================
+  // ==========================================================
   // COUNTS
-  // ============================================================
+  // ==========================================================
 
   const mappedCount =
     rows.filter(
@@ -1339,25 +2055,28 @@ export default function UploadCropDetails({
     ).length;
 
   const pendingCount =
-    rows.length -
-    mappedCount;
+    rows.filter(
+      (row) =>
+        row.mappingStatus ===
+        "Pending"
+    ).length;
 
   const visibleRows =
     rows.slice(
-      page *
-        rowsPerPage,
-
-      page *
-          rowsPerPage +
+      page * rowsPerPage,
+      page * rowsPerPage +
         rowsPerPage
     );
 
-  // ============================================================
-  // COMPLETE
-  // ============================================================
+  // ==========================================================
+  // COMPLETE MAPPING
+  // ==========================================================
 
   const handleComplete =
-    () => {
+    async () => {
+      setError("");
+      setSuccess("");
+
       if (
         rows.length === 0
       ) {
@@ -1378,24 +2097,63 @@ export default function UploadCropDetails({
         return;
       }
 
-      localStorage.removeItem(
-        "pendingCropRegion"
-      );
+      try {
+        setMappingLoading(
+          true
+        );
 
-      setSuccess(
-        "All crop rows mapped successfully."
-      );
+        const result =
+          await completeCropMapping(
+            selectedRegionId
+          );
 
-      if (onComplete) {
-        onComplete(
-          regionName
+        if (
+          result?.success === false
+        ) {
+          throw new Error(
+            result?.details ||
+              result?.error ||
+              result?.message ||
+              "Unable to complete mapping."
+          );
+        }
+
+        localStorage.removeItem(
+          sessionKey(
+            selectedRegionId
+          )
+        );
+
+        localStorage.removeItem(
+          "pendingCropRegion"
+        );
+
+        setSuccess(
+          result?.message ||
+            "All crop rows mapped successfully."
+        );
+
+        if (onComplete) {
+          onComplete(
+            regionName
+          );
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to complete mapping."
+        );
+      } finally {
+        setMappingLoading(
+          false
         );
       }
     };
 
-  // ============================================================
+  // ==========================================================
   // LOADING
-  // ============================================================
+  // ==========================================================
 
   if (loading) {
     return (
@@ -1409,9 +2167,9 @@ export default function UploadCropDetails({
     );
   }
 
-  // ============================================================
+  // ==========================================================
   // UI
-  // ============================================================
+  // ==========================================================
 
   return (
     <Box>
@@ -1427,8 +2185,7 @@ export default function UploadCropDetails({
           fontWeight="bold"
           mb={1}
         >
-          🌾 Upload Crop
-          Details
+          🌾 Upload Crop Details
         </Typography>
 
         <Typography
@@ -1436,10 +2193,9 @@ export default function UploadCropDetails({
           color="text.secondary"
           mb={3}
         >
-          Upload Excel,
-          review crop rows and
-          map each row to the
-          correct KML field.
+          Upload Excel, review crop rows
+          and map each row to the correct
+          KML field.
         </Typography>
 
         {error && (
@@ -1476,13 +2232,10 @@ export default function UploadCropDetails({
               selectedRegionId
             }
             label="Region"
-            onChange={(
-              event
-            ) =>
+            onChange={(event) =>
               setSelectedRegionId(
                 String(
-                  event.target
-                    .value
+                  event.target.value
                 )
               )
             }
@@ -1510,7 +2263,7 @@ export default function UploadCropDetails({
           </Select>
         </FormControl>
 
-        {/* COUNTS */}
+        {/* STATUS */}
 
         <Box
           display="flex"
@@ -1533,6 +2286,17 @@ export default function UploadCropDetails({
             color="warning"
             variant="outlined"
           />
+
+          {statusLoading && (
+            <Chip
+              label="Syncing..."
+              icon={
+                <CircularProgress
+                  size={14}
+                />
+              }
+            />
+          )}
         </Box>
 
         {/* EXCEL */}
@@ -1584,7 +2348,6 @@ export default function UploadCropDetails({
           }
           sx={{
             mb: 3,
-
             backgroundColor:
               "#075d16",
 
@@ -1611,15 +2374,13 @@ export default function UploadCropDetails({
 
         {/* GRID */}
 
-        {rows.length >
-          0 && (
+        {rows.length > 0 && (
           <>
             <TableContainer>
               <Table
                 size="small"
                 sx={{
-                  minWidth:
-                    1200,
+                  minWidth: 1200,
                 }}
               >
                 <TableHead>
@@ -1670,9 +2431,7 @@ export default function UploadCropDetails({
                   {visibleRows.map(
                     (row) => (
                       <TableRow
-                        key={
-                          row.id
-                        }
+                        key={row.id}
                       >
                         <TableCell>
                           {row.fieldId ||
@@ -1680,15 +2439,11 @@ export default function UploadCropDetails({
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.cropType
-                          }
+                          {row.cropType}
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.season
-                          }
+                          {row.season}
                         </TableCell>
 
                         <TableCell>
@@ -1697,27 +2452,23 @@ export default function UploadCropDetails({
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.sowingDate
-                          }
+                          {row.sowingDate ||
+                            "-"}
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.expectedHarvestDate
-                          }
+                          {row.expectedHarvestDate ||
+                            "-"}
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.expectedYield
-                          }
+                          {row.expectedYield ||
+                            "-"}
                         </TableCell>
 
                         <TableCell>
-                          {
-                            row.area
-                          }
+                          {row.area ||
+                            "-"}
                         </TableCell>
 
                         <TableCell>
@@ -1742,13 +2493,21 @@ export default function UploadCropDetails({
                             startIcon={
                               <MapIcon />
                             }
+                            disabled={
+                              !uploaded ||
+                              row.mappingStatus ===
+                                "Mapped"
+                            }
                             onClick={() =>
                               openMap(
                                 row
                               )
                             }
                           >
-                            MAP
+                            {row.mappingStatus ===
+                            "Mapped"
+                              ? "MAPPED"
+                              : "MAP"}
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -1786,8 +2545,7 @@ export default function UploadCropDetails({
               ) => {
                 setRowsPerPage(
                   Number(
-                    event.target
-                      .value
+                    event.target.value
                   )
                 );
 
@@ -1795,15 +2553,21 @@ export default function UploadCropDetails({
               }}
             />
 
+            {/* COMPLETE */}
+
             <Button
               fullWidth
               variant="contained"
+              disabled={
+                pendingCount !==
+                  0 ||
+                mappingLoading
+              }
               onClick={
                 handleComplete
               }
               sx={{
                 mt: 2,
-
                 backgroundColor:
                   "#075d16",
 
@@ -1813,14 +2577,27 @@ export default function UploadCropDetails({
                 },
               }}
             >
-              COMPLETE
-              MAPPING
+              {mappingLoading ? (
+                <>
+                  <CircularProgress
+                    size={21}
+                    color="inherit"
+                    sx={{ mr: 1 }}
+                  />
+
+                  PROCESSING...
+                </>
+              ) : (
+                "COMPLETE MAPPING"
+              )}
             </Button>
           </>
         )}
       </Paper>
 
-      {/* MAP POPUP */}
+      {/* ======================================================
+          MAP DIALOG
+          ====================================================== */}
 
       <Dialog
         open={
@@ -1831,6 +2608,12 @@ export default function UploadCropDetails({
         fullWidth
         maxWidth="lg"
         onClose={() => {
+          if (
+            mappingLoading
+          ) {
+            return;
+          }
+
           setMappingRow(
             null
           );
@@ -1856,8 +2639,7 @@ export default function UploadCropDetails({
             <Box
               sx={{
                 height: 500,
-                width:
-                  "100%",
+                width: "100%",
               }}
             >
               <MapContainer
@@ -1869,7 +2651,6 @@ export default function UploadCropDetails({
                 style={{
                   height:
                     "100%",
-
                   width:
                     "100%",
                 }}
@@ -1883,41 +2664,31 @@ export default function UploadCropDetails({
                   data={
                     geometry
                   }
+                  style={() => ({
+                    weight: 2,
+                  })}
                   onEachFeature={(
-                    feature:
-                      any,
-
-                    layer:
-                      any
+                    feature,
+                    layer
                   ) => {
-                    const collection =
-                      geometry as FeatureCollection;
-
-                    let index =
-                      collection
-                        .features
-                        .findIndex(
-                          (
-                            item
-                          ) =>
-                            item ===
-                            feature
-                        );
-
-                    if (
-                      index < 0
-                    ) {
-                      index = 0;
-                    }
-
                     layer.on({
-                      click:
-                        () =>
-                          handlePolygonClick(
-                            feature,
-                            index
-                          ),
+                      click: () =>
+                        handlePolygonClick(
+                          feature
+                        ),
                     });
+
+                    layer.bindTooltip(
+                      String(
+                        feature
+                          ?.properties
+                          ?.geometry_reference_id ??
+                          feature
+                            ?.properties
+                            ?.temp_field_id ??
+                          "Field"
+                      )
+                    );
                   }}
                 />
 
@@ -1950,6 +2721,9 @@ export default function UploadCropDetails({
 
         <DialogActions>
           <Button
+            disabled={
+              mappingLoading
+            }
             onClick={() => {
               setMappingRow(
                 null
@@ -1966,13 +2740,28 @@ export default function UploadCropDetails({
           <Button
             variant="contained"
             disabled={
-              !selectedPolygon
+              !selectedPolygon ||
+              mappingLoading
             }
             onClick={
               confirmMapping
             }
           >
-            CONFIRM MAP
+            {mappingLoading ? (
+              <>
+                <CircularProgress
+                  size={20}
+                  color="inherit"
+                  sx={{
+                    mr: 1,
+                  }}
+                />
+
+                MAPPING...
+              </>
+            ) : (
+              "CONFIRM MAP"
+            )}
           </Button>
         </DialogActions>
       </Dialog>
