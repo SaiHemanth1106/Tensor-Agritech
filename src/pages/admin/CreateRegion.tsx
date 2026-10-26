@@ -1,10 +1,9 @@
-﻿import {
-  useEffect,
-  useState,
-} from "react";
+﻿
+import { useEffect, useState } from "react";
 
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   CircularProgress,
@@ -17,6 +16,8 @@ import {
   Typography,
 } from "@mui/material";
 
+import { Country, State } from "country-state-city";
+
 import {
   createRegion,
   getOrganizations,
@@ -25,6 +26,7 @@ import {
 interface Organization {
   id: number;
   name: string;
+  is_active?: boolean;
 }
 
 interface RegionForm {
@@ -43,259 +45,170 @@ const initialForm: RegionForm = {
   description: "",
 };
 
-const extractOrganizations = (
-  response: any
-): Organization[] => {
-  if (Array.isArray(response)) {
-    return response;
+const extractOrganizations = (response: any): Organization[] => {
+  const data =
+    response?.organizations ??
+    response?.data?.organizations ??
+    response?.data ??
+    response;
+
+  if (!Array.isArray(data)) {
+    return [];
   }
 
-  if (
-    Array.isArray(
-      response?.organizations
-    )
-  ) {
-    return response.organizations;
-  }
-
-  if (
-    Array.isArray(response?.data)
-  ) {
-    return response.data;
-  }
-
-  return [];
+  return data.filter(
+    (organization: Organization) => organization.is_active !== false
+  );
 };
 
 export default function CreateRegion() {
-  const [
-    organizations,
-    setOrganizations,
-  ] = useState<Organization[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [form, setForm] = useState<RegionForm>(initialForm);
 
-  const [
-    form,
-    setForm,
-  ] = useState<RegionForm>(
-    initialForm
-  );
+  const [selectedCountry, setSelectedCountry] =
+    useState<ReturnType<typeof Country.getAllCountries>[number] | null>(
+      null
+    );
 
-  const [
-    loadingOrganizations,
-    setLoadingOrganizations,
-  ] = useState(true);
+  const [selectedState, setSelectedState] =
+    useState<ReturnType<typeof State.getStatesOfCountry>[number] | null>(
+      null
+    );
 
-  const [
-    submitting,
-    setSubmitting,
-  ] = useState(false);
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [
-    error,
-    setError,
-  ] = useState("");
+  const countries = Country.getAllCountries();
 
-  const [
-    success,
-    setSuccess,
-  ] = useState("");
+  const states = selectedCountry
+    ? State.getStatesOfCountry(selectedCountry.isoCode)
+    : [];
 
   useEffect(() => {
-    const loadOrganizations =
-      async () => {
-        try {
-          setLoadingOrganizations(
-            true
-          );
+    const loadOrganizations = async () => {
+      try {
+        setLoadingOrganizations(true);
+        setError("");
 
-          setError("");
-
-          const response =
-            await getOrganizations();
-
-          setOrganizations(
-            extractOrganizations(
-              response
-            )
-          );
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load organizations."
-          );
-        } finally {
-          setLoadingOrganizations(
-            false
-          );
-        }
-      };
+        const response = await getOrganizations();
+        setOrganizations(extractOrganizations(response));
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load organizations."
+        );
+      } finally {
+        setLoadingOrganizations(false);
+      }
+    };
 
     void loadOrganizations();
   }, []);
 
-  const updateField = (
-    field: keyof RegionForm,
-    value: string
-  ) => {
+  const updateField = (field: keyof RegionForm, value: string) => {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
   };
 
-  const handleSubmit =
-    async () => {
-      setError("");
-      setSuccess("");
+  const handleSubmit = async () => {
+    setError("");
+    setSuccess("");
 
-      if (!form.organizationId) {
-        setError(
-          "Please select Organisation ID."
+    if (!form.organizationId) {
+      setError("Please select Organisation ID.");
+      return;
+    }
+
+    if (!form.country.trim()) {
+      setError("Please select Country.");
+      return;
+    }
+
+    if (!form.state.trim()) {
+      setError("Please select State.");
+      return;
+    }
+
+    if (!form.name.trim()) {
+      setError("Please enter Region Name.");
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setError("Please enter Description.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const result = await createRegion({
+        organization_id: Number(form.organizationId),
+        country: form.country.trim(),
+        state: form.state.trim(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+      });
+
+      if (result?.success === false) {
+        throw new Error(
+          result?.error || result?.message || "Region creation failed."
         );
-
-        return;
       }
 
-      if (!form.country.trim()) {
-        setError(
-          "Please enter Country."
-        );
-
-        return;
-      }
-
-      if (!form.state.trim()) {
-        setError(
-          "Please enter State."
-        );
-
-        return;
-      }
-
-      if (!form.name.trim()) {
-        setError(
-          "Please enter Region Name."
-        );
-
-        return;
-      }
+      const regionId =
+        result?.region_id ??
+        result?.region?.region_id ??
+        result?.region?.id ??
+        result?.id;
 
       if (
-        !form.description.trim()
+        regionId === undefined ||
+        regionId === null ||
+        String(regionId).trim() === ""
       ) {
-        setError(
-          "Please enter Description."
+        throw new Error(
+          "The response did not contain a region ID. Check the API response."
         );
-
-        return;
       }
 
-      try {
-        setSubmitting(true);
+      const regionData = {
+        regionId: String(regionId),
+        organizationId: String(
+          result?.organization_id ?? form.organizationId
+        ),
+        country: result?.country ?? form.country.trim(),
+        state: result?.state ?? form.state.trim(),
+        regionName: result?.name ?? form.name.trim(),
+        description: result?.description ?? form.description.trim(),
+      };
 
-        const result =
-          await createRegion({
-            organization_id:
-              Number(
-                form.organizationId
-              ),
+      localStorage.setItem("lastCreatedRegion", JSON.stringify(regionData));
+      localStorage.setItem("lastCreatedRegionId", String(regionId));
 
-            country:
-              form.country.trim(),
+      setSuccess(
+        `Region created successfully. Region ID: ${regionId}`
+      );
 
-            state:
-              form.state.trim(),
-
-            name:
-              form.name.trim(),
-
-            description:
-              form.description.trim(),
-          });
-
-        if (
-          result?.success ===
-          false
-        ) {
-          throw new Error(
-            result?.error ||
-              result?.message ||
-              "Region creation failed."
-          );
-        }
-
-        const regionId =
-          result?.region_id ??
-          result?.region?.region_id ??
-          result?.id;
-
-        if (!regionId) {
-          throw new Error(
-            "Region was created but region_id was not returned."
-          );
-        }
-
-        const regionData = {
-          regionId:
-            String(regionId),
-
-          organizationId:
-            String(
-              result?.organization_id ??
-                form.organizationId
-            ),
-
-          country:
-            result?.country ??
-            form.country.trim(),
-
-          state:
-            result?.state ??
-            form.state.trim(),
-
-          regionName:
-            result?.name ??
-            form.name.trim(),
-
-          description:
-            result?.description ??
-            form.description.trim(),
-        };
-
-        localStorage.setItem(
-          "lastCreatedRegion",
-          JSON.stringify(
-            regionData
-          )
-        );
-
-        localStorage.setItem(
-          "lastCreatedRegionId",
-          String(regionId)
-        );
-
-        setSuccess(
-          `Region created successfully. Region ID: ${regionId}`
-        );
-
-        setForm(initialForm);
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to create region."
-        );
-      } finally {
-        setSubmitting(false);
-      }
-    };
+      setForm(initialForm);
+      setSelectedCountry(null);
+      setSelectedState(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to create region."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <Box
-      maxWidth={650}
-      mx="auto"
-    >
+    <Box maxWidth={650} mx="auto">
       <Paper
         elevation={3}
         sx={{
@@ -303,39 +216,23 @@ export default function CreateRegion() {
           borderRadius: 3,
         }}
       >
-        <Typography
-          variant="h5"
-          fontWeight="bold"
-          mb={1}
-        >
+        <Typography variant="h5" fontWeight="bold" mb={1}>
           📍 Create Region
         </Typography>
 
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          mb={3}
-        >
-          Create the region first.
-          KML upload is available
-          separately under Create
-          Field.
+        <Typography variant="body2" color="text.secondary" mb={3}>
+          Create a region first. You can upload its KML file later from
+          Create Field.
         </Typography>
 
         {error && (
-          <Alert
-            severity="error"
-            sx={{ mb: 2 }}
-          >
+          <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
 
         {success && (
-          <Alert
-            severity="success"
-            sx={{ mb: 2 }}
-          >
+          <Alert severity="success" sx={{ mb: 2 }}>
             {success}
           </Alert>
         )}
@@ -344,74 +241,112 @@ export default function CreateRegion() {
           fullWidth
           required
           sx={{ mb: 2 }}
-          disabled={
-            loadingOrganizations ||
-            submitting
-          }
+          disabled={loadingOrganizations || submitting}
         >
-          <InputLabel>
+          <InputLabel id="organization-label">
             Organisation ID
           </InputLabel>
 
           <Select
-            value={
-              form.organizationId
-            }
+            labelId="organization-label"
+            value={form.organizationId}
             label="Organisation ID"
             onChange={(event) =>
-              updateField(
-                "organizationId",
-                String(
-                  event.target.value
-                )
-              )
+              updateField("organizationId", String(event.target.value))
             }
           >
-            {organizations.map(
-              (organization) => (
-                <MenuItem
-                  key={
-                    organization.id
-                  }
-                  value={
-                    organization.id
-                  }
-                >
-                  {organization.id} —{" "}
-                  {organization.name}
-                </MenuItem>
-              )
-            )}
+            {organizations.map((organization) => (
+              <MenuItem key={organization.id} value={organization.id}>
+                {organization.id} — {organization.name}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
 
-        <TextField
+        {loadingOrganizations && (
+          <Box display="flex" alignItems="center" gap={1} mb={2}>
+            <CircularProgress size={18} />
+            <Typography variant="body2">
+              Loading organizations...
+            </Typography>
+          </Box>
+        )}
+
+        {!loadingOrganizations && organizations.length === 0 && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            No active organizations were returned by the API.
+          </Alert>
+        )}
+
+        <Autocomplete
           fullWidth
-          required
-          label="Country"
-          value={form.country}
+          options={countries}
+          value={selectedCountry}
           disabled={submitting}
-          onChange={(event) =>
-            updateField(
-              "country",
-              event.target.value
-            )
+          autoHighlight
+          filterSelectedOptions
+          getOptionLabel={(option) => option.name}
+          isOptionEqualToValue={(option, value) =>
+            option.isoCode === value.isoCode
           }
+          onChange={(_, country) => {
+            setSelectedCountry(country);
+            setSelectedState(null);
+
+            setForm((current) => ({
+              ...current,
+              country: country?.name ?? "",
+              state: "",
+            }));
+
+            setError("");
+            setSuccess("");
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Country"
+              placeholder="Search country..."
+              required
+            />
+          )}
           sx={{ mb: 2 }}
         />
 
-        <TextField
+        <Autocomplete
           fullWidth
-          required
-          label="State"
-          value={form.state}
-          disabled={submitting}
-          onChange={(event) =>
-            updateField(
-              "state",
-              event.target.value
-            )
+          options={states}
+          value={selectedState}
+          disabled={!selectedCountry || submitting}
+          autoHighlight
+          filterSelectedOptions
+          getOptionLabel={(option) => option.name}
+          isOptionEqualToValue={(option, value) =>
+            option.isoCode === value.isoCode
           }
+          onChange={(_, state) => {
+            setSelectedState(state);
+
+            setForm((current) => ({
+              ...current,
+              state: state?.name ?? "",
+            }));
+
+            setError("");
+            setSuccess("");
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="State"
+              placeholder={
+                selectedCountry
+                  ? "Search state..."
+                  : "Select country first"
+              }
+              required
+            />
+          )}
           sx={{ mb: 2 }}
         />
 
@@ -421,12 +356,11 @@ export default function CreateRegion() {
           label="Region Name"
           value={form.name}
           disabled={submitting}
-          onChange={(event) =>
-            updateField(
-              "name",
-              event.target.value
-            )
-          }
+          onChange={(event) => {
+            updateField("name", event.target.value);
+            setError("");
+            setSuccess("");
+          }}
           sx={{ mb: 2 }}
         />
 
@@ -436,32 +370,30 @@ export default function CreateRegion() {
           multiline
           rows={3}
           label="Description"
-          value={
-            form.description
-          }
+          value={form.description}
           disabled={submitting}
-          onChange={(event) =>
-            updateField(
-              "description",
-              event.target.value
-            )
-          }
+          onChange={(event) => {
+            updateField("description", event.target.value);
+            setError("");
+            setSuccess("");
+          }}
           sx={{ mb: 3 }}
         />
 
         <Button
           fullWidth
           variant="contained"
-          disabled={submitting}
+          disabled={
+            submitting ||
+            loadingOrganizations ||
+            organizations.length === 0
+          }
           onClick={handleSubmit}
           sx={{
             minHeight: 45,
-            backgroundColor:
-              "#075d16",
-
+            backgroundColor: "#075d16",
             "&:hover": {
-              backgroundColor:
-                "#064d12",
+              backgroundColor: "#064d12",
             },
           }}
         >
@@ -472,7 +404,6 @@ export default function CreateRegion() {
                 color="inherit"
                 sx={{ mr: 1 }}
               />
-
               CREATING...
             </>
           ) : (
