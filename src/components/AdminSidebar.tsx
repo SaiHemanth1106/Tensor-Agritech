@@ -12,55 +12,95 @@ import PersonIcon from "@mui/icons-material/Person";
 import AddLocationAltIcon from "@mui/icons-material/AddLocationAlt";
 import ListAltIcon from "@mui/icons-material/ListAlt";
 import ToggleOffIcon from "@mui/icons-material/ToggleOff";
-import DashboardIcon from "@mui/icons-material/Dashboard"; // ✅ ADD
+import DashboardIcon from "@mui/icons-material/Dashboard";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export default function AdminSidebar({ setPage }: any) {
-
   const [collapsed, setCollapsed] = useState(false);
-
-  // ✅ FIX: default to dashboard
   const [active, setActive] = useState("admin-dashboard");
 
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const user = JSON.parse(
+    localStorage.getItem("user") || "{}"
+  );
 
   const adminMenu = [
     {
       section: "Overview",
       items: [
-        { label: "Dashboard", icon: <DashboardIcon />, key: "admin-dashboard" } // ✅ ADD
+        {
+          label: "Dashboard",
+          icon: <DashboardIcon />,
+          key: "admin-dashboard"
+        }
       ]
     },
     {
       section: "Organization",
       items: [
-        { label: "Create Organization", icon: <BusinessIcon />, key: "org-create" },
-        { label: "Deactivate Organization", icon: <ToggleOffIcon />, key: "org-deactivate" }
+        {
+          label: "Create Organization",
+          icon: <BusinessIcon />,
+          key: "org-create"
+        },
+        {
+          label: "Deactivate Organization",
+          icon: <ToggleOffIcon />,
+          key: "org-deactivate"
+        }
       ]
     },
     {
       section: "User Management",
       items: [
-        { label: "Create User", icon: <PersonIcon />, key: "user-create" },
-        { label: "Deactivate User", icon: <ToggleOffIcon />, key: "user-deactivate" }
+        {
+          label: "Create User",
+          icon: <PersonIcon />,
+          key: "user-create"
+        },
+        {
+          label: "Deactivate User",
+          icon: <ToggleOffIcon />,
+          key: "user-deactivate"
+        }
       ]
     },
     {
       section: "Region Management",
       items: [
-        { label: "Create Region", icon: <AddLocationAltIcon />, key: "region-create" },
-        { label: "View Regions", icon: <ListAltIcon />, key: "region-management" },
-        { label: "Upload Crop Details", icon: <ListAltIcon />, key: "region-upload-crop-details" },
-        { label: "Disable Monitoring", icon: <ToggleOffIcon />, key: "region-disable-monitoring" }
+        {
+          label: "Create Region",
+          icon: <AddLocationAltIcon />,
+          key: "region-create"
+        },
+        {
+          label: "Create Field",
+          icon: <AddLocationAltIcon />,
+          key: "field-create"
+        },
+        {
+          label: "View Regions",
+          icon: <ListAltIcon />,
+          key: "region-management"
+        },
+        {
+          label: "Upload Crop Details",
+          icon: <ListAltIcon />,
+          key: "region-upload-crop-details"
+        },
+        {
+          label: "Disable Monitoring",
+          icon: <ToggleOffIcon />,
+          key: "region-disable-monitoring"
+        }
       ]
     }
   ];
 
-  // ✅ FIX: Only update page when active changes
-  useEffect(() => {
-    setPage(active);
-  }, [active]);
+  const handleNavigate = (key: string) => {
+    setActive(key);
+    setPage(key);
+  };
 
   return (
     <Box
@@ -76,10 +116,7 @@ export default function AdminSidebar({ setPage }: any) {
         boxShadow: "2px 0px 8px rgba(0,0,0,0.2)"
       }}
     >
-
-      {/* TOP */}
       <Box p={1}>
-
         <IconButton
           onClick={() => setCollapsed(!collapsed)}
           sx={{ color: "white", mb: 2 }}
@@ -89,24 +126,35 @@ export default function AdminSidebar({ setPage }: any) {
 
         {!collapsed && (
           <Box textAlign="center" mb={2}>
-            <img src="/logo.png" style={{ width: "140px" }} />
+            <img
+              src="/logo.png"
+              alt="Tensor AgriTech"
+              style={{ width: "140px" }}
+            />
           </Box>
         )}
 
         {!collapsed && (
-          <Typography textAlign="center" mb={2} sx={{ opacity: 0.85 }}>
+          <Typography
+            textAlign="center"
+            mb={2}
+            sx={{ opacity: 0.85 }}
+          >
             👤 {user?.username || "Admin"}
           </Typography>
         )}
 
-        {/* MENU */}
         {adminMenu.map((section) => (
           <Box key={section.section} mb={1}>
-
             {!collapsed && (
               <Typography
                 variant="caption"
-                sx={{ ml: 1, mb: 1, display: "block", opacity: 0.7 }}
+                sx={{
+                  ml: 1,
+                  mb: 1,
+                  display: "block",
+                  opacity: 0.7
+                }}
               >
                 {section.section}
               </Typography>
@@ -119,7 +167,7 @@ export default function AdminSidebar({ setPage }: any) {
                 placement="right"
               >
                 <Box
-                  onClick={() => setActive(item.key)}
+                  onClick={() => handleNavigate(item.key)}
                   sx={{
                     display: "flex",
                     alignItems: "center",
@@ -128,14 +176,25 @@ export default function AdminSidebar({ setPage }: any) {
                     py: 1.2,
                     borderRadius: 2,
                     backgroundColor:
-                      active === item.key ? "#40916C" : "transparent",
-                    "&:hover": { backgroundColor: "#2D6A4F" }
+                      active === item.key
+                        ? "#40916C"
+                        : "transparent",
+                    "&:hover": {
+                      backgroundColor: "#2D6A4F"
+                    }
                   }}
                 >
-                  <Box width={30}>{item.icon}</Box>
+                  <Box width={30}>
+                    {item.icon}
+                  </Box>
 
                   {!collapsed && (
-                    <Typography sx={{ ml: 2, fontSize: "14px" }}>
+                    <Typography
+                      sx={{
+                        ml: 2,
+                        fontSize: "14px"
+                      }}
+                    >
                       {item.label}
                     </Typography>
                   )}
@@ -143,20 +202,27 @@ export default function AdminSidebar({ setPage }: any) {
               </Tooltip>
             ))}
 
-            <Divider sx={{ my: 1, bgcolor: "rgba(255,255,255,0.2)" }} />
-
+            <Divider
+              sx={{
+                my: 1,
+                bgcolor: "rgba(255,255,255,0.2)"
+              }}
+            />
           </Box>
         ))}
-
       </Box>
 
-      {/* FOOTER */}
       {!collapsed && (
-        <Typography textAlign="center" sx={{ mb: 2, opacity: 0.7 }}>
+        <Typography
+          textAlign="center"
+          sx={{
+            mb: 2,
+            opacity: 0.7
+          }}
+        >
           © 2026 Tensor AgriTech Pvt. Ltd.
         </Typography>
       )}
-
     </Box>
   );
 }

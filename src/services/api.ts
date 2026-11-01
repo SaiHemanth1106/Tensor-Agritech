@@ -1,27 +1,31 @@
+
 import axios from "axios";
 
-const BASE_URL = "https://171oyca6o7.execute-api.ap-south-1.amazonaws.com";
+const BASE_URL =
+  "https://171oyca6o7.execute-api.ap-south-1.amazonaws.com";
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000
+  timeout: 30000,
 });
 
-// ==============================
-// 🔐 REQUEST INTERCEPTOR
-// ==============================
+// ============================================================
+// AUTHENTICATION
+// ============================================================
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// ==============================
-// 🔐 RESPONSE INTERCEPTOR
-// ==============================
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -36,212 +40,375 @@ api.interceptors.response.use(
   }
 );
 
-// ==============================
-// 🧰 SAFE HANDLER (🔥 FIXED)
-// ==============================
-const handle = async (promise: Promise<any>) => {
+// ============================================================
+// RESPONSE HELPERS
+// ============================================================
+
+export const unwrap = (input: any): any => {
+  let data = input;
+
+  if (
+    data &&
+    typeof data === "object" &&
+    "body" in data
+  ) {
+    data =
+      typeof data.body === "string"
+        ? JSON.parse(data.body)
+        : data.body;
+  }
+
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      // Keep a non-JSON string unchanged.
+    }
+  }
+
+  return data;
+};
+
+export const getErrorMessage = (error: any): string => {
+  let responseData: any;
+
   try {
-    const res = await promise;
-    let data = res.data;
+    responseData = unwrap(error?.response?.data);
+  } catch {
+    responseData = error?.response?.data;
+  }
 
-    // ✅ Lambda proxy response
-    if (data && typeof data === "object" && "body" in data) {
-      data =
-        typeof data.body === "string"
-          ? JSON.parse(data.body)
-          : data.body;
-    }
+  return (
+    responseData?.details ||
+    responseData?.error ||
+    responseData?.message ||
+    error?.message ||
+    "Request failed."
+  );
+};
 
-    // ✅ Sometimes body itself is string
-    if (typeof data === "string") {
-      try {
-        data = JSON.parse(data);
-      } catch {
-        // ignore
-      }
-    }
+// ============================================================
+// AUTH
+// ============================================================
 
-    return data;
-
-  } catch (err: any) {
-    console.error("HANDLE ERROR:", err);
-
-    // ✅ ALWAYS RETURN SAFE ERROR
-    return Promise.reject({
-      message:
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        "Something went wrong"
-    });
+export const loginApi = async (data: any) => {
+  try {
+    const response = await api.post("/login", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
   }
 };
 
-// ==============================
-// 🔐 AUTH
-// ==============================
-export const loginApi = (data: any) =>
-  handle(api.post("/login", data));
+// ============================================================
+// ORGANIZATIONS
+// ============================================================
 
-// ==============================
-// 📊 DASHBOARD
-// ==============================
-export const getRegions = () =>
-  handle(api.get("/regions"));
+export const getOrganizations = async () => {
+  try {
+    const response = await api.get("/organizations");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const createOrganization = async (data: any) => {
+  try {
+    const response = await api.post("/organizations", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const deactivateOrganization = async (id: number) => {
+  try {
+    const response = await api.patch(
+      `/organizations/${id}/deactivate`
+    );
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// DASHBOARD REGIONS
+// Keep GET /regions unchanged for dashboard visualization.
+// ============================================================
+
+export const getRegions = async () => {
+  try {
+    const response = await api.get("/regions");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// CREATE FIELD: ORGANIZATION-SCOPED REGIONS
+// Uses the separate GET /region-field endpoint.
+// ============================================================
+
+export interface FieldRegionQuery {
+  organization_id: number;
+  country?: string;
+  state?: string;
+}
+
+export const getFieldRegions = async (
+  params: FieldRegionQuery
+) => {
+  try {
+    const response = await api.get("/region-field", {
+      params,
+    });
+
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// CREATE REGION
+// ============================================================
 
 export interface CreateRegionPayload {
   organization_id: number;
+  country: string;
+  state: string;
   name: string;
   description: string;
-  region_area: number;
+}
+
+export const createRegion = async (
+  data: CreateRegionPayload
+) => {
+  try {
+    const response = await api.post("/regions", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// REGION KML UPLOAD
+// ============================================================
+
+export interface RegionKmlPayload {
+  region_id: string | number;
   kml_file_name: string;
   kml_file_content: string;
 }
 
-export const createRegion = (
-  data: CreateRegionPayload
-) =>
-  handle(
-    api.post("/region/upload", data)
-  );
-// ==============================
-// 🌱 SOIL
-// ==============================
-export const getSoilSummary = () =>
-  handle(api.get("/soil-summary"));
-
-// ==============================
-// 🌿 CROP
-// ==============================
-export const getCropSummary = () =>
-  handle(api.get("/crop-summary"));
-
-// ==============================
-// 🗺️ MAP
-// ==============================
-export const getMap = (params: any) =>
-  handle(api.get("/map", { params }));
-
-// ==============================
-// 📄 RECOMMENDATIONS
-// ==============================
-export const getRecommendations = () =>
-  handle(api.get("/recommendations"));
-
-export const createRecommendation = (data: any) =>
-  handle(api.post("/recommendations", data));
-
-// ==============================
-// 🛠️ ADMIN - ORGANIZATION
-// ==============================
-export const getOrganizations = () =>
-  handle(api.get("/organizations"));
-
-export const createOrganization = (data: any) =>
-  handle(api.post("/organizations", data));
-
-export const deactivateOrganization = (id: number) =>
-  handle(api.patch(`/organizations/${id}/deactivate`));
-
-export const activateUser = (id: number) =>
-  handle(api.patch(`/users/${id}/activate`));
-// ==============================
-// 🛠️ ADMIN - USERS
-// ==============================
-export const getUsers = () =>
-  handle(api.get("/users"));
-
-export const createUser = (data: any) =>
-  handle(api.post("/users", data));
-
-export const deactivateUser = (id: number) =>
-  handle(api.patch(`/users/${id}/deactivate`));
-
-// ==============================
-// 🌾 ADMIN - REGION
-// ==============================
-export interface RegionImportPayload {
-  region_id: number | string;
-  name?: string;
-  /** Base64 KML content consumed by the region-import Lambda. */
-  file_content: string;
-  file_name?: string;
-  /** Base64 Excel content consumed by the region-import Lambda. */
-  crop_data_file?: string;
-  crop_data_file_name?: string;
-  crop_data_content_type?: string;
-  monitoring?: Record<string, unknown>;
-  crop_cycle?: Record<string, unknown>;
-}
-
-/**
- * Sends an existing region ID and its KML to API Gateway. The Lambda behind
- * this route is responsible for updating that region's database records.
- */
-export const updateRegionFromImport = (data: RegionImportPayload) =>
-  handle(api.post("/region/upload", data));
-
-// Kept for compatibility with existing callers.
-export const uploadRegion = updateRegionFromImport;
-
-export const getRegionsByOrg = (organization_id: number) =>
-  handle(api.get(`/regions?organization_id=${organization_id}`));
-
-export const disableMonitoring = (farm_id: number) =>
-  handle(api.patch(`/region/${farm_id}/disable-monitoring`));
-
-export const saveRegionMappings = async (regionId: number | string, payload: Record<string, unknown>) => {
-  const attempts = [
-    () => handle(api.patch(`/region/${regionId}/mapping`, payload)),
-    () => handle(api.put(`/region/${regionId}/mapping`, payload)),
-    () => handle(api.patch(`/regions/${regionId}/mapping`, payload)),
-    () => handle(api.put(`/regions/${regionId}/mapping`, payload)),
-    () => handle(api.patch(`/region/${regionId}/fields`, payload)),
-    () => handle(api.patch(`/regions/${regionId}/fields`, payload)),
-    () => handle(api.post(`/region/${regionId}/mapping`, payload)),
-    () => handle(api.post(`/regions/${regionId}/mapping`, payload))
-  ];
-
-  let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      return await attempt();
-    } catch (error) {
-      lastError = error;
-    }
+export const uploadRegionKml = async (
+  data: RegionKmlPayload
+) => {
+  try {
+    const response = await api.post("/region/upload", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
   }
-
-  return Promise.reject(lastError ?? { message: "Failed to save region mappings." });
 };
 
-export const uploadCropDetailsExcel = async (regionId: number | string, payload: Record<string, unknown>) => {
-  const attempts = [
-    () => handle(api.post(`/region/${regionId}/crop-details`, payload)),
-    () => handle(api.post(`/regions/${regionId}/crop-details`, payload)),
-    () => handle(api.post(`/region/${regionId}/upload-crop-details`, payload)),
-    () => handle(api.post(`/regions/${regionId}/upload-crop-details`, payload)),
-    () => handle(api.post(`/crop-details/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/crop-data/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/region/upload`, { region_id: regionId, ...payload })),
-    () => handle(api.post(`/regions/upload`, { region_id: regionId, ...payload }))
-  ];
+// ============================================================
+// USER MANAGEMENT
+// ============================================================
 
-  let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      return await attempt();
-    } catch (error) {
-      lastError = error;
-    }
+export const getUsers = async () => {
+  try {
+    const response = await api.get("/users");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
   }
-
-  return Promise.reject(lastError ?? { message: "Failed to upload crop details Excel." });
 };
 
-// ==============================
-// 📊 ADMIN DASHBOARD
-// ==============================
-export const getAdminDashboard = () =>
-  handle(api.get("/admin/dashboard"));
+export const createUser = async (data: any) => {
+  try {
+    const response = await api.post("/users", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const deactivateUser = async (id: number) => {
+  try {
+    const response = await api.patch(`/users/${id}/deactivate`);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const activateUser = async (id: number) => {
+  try {
+    const response = await api.patch(`/users/${id}/activate`);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// CROP DETAILS EXCEL UPLOAD
+// ============================================================
+
+export const uploadCropDetailsExcel = async (
+  regionId: string | number,
+  payload: {
+    region_id?: string | number;
+    file_name?: string;
+    file_content?: string;
+    crop_data_file_name?: string;
+    crop_data_file?: string;
+  }
+) => {
+  const body = {
+    region_id: Number(payload.region_id ?? regionId),
+    file_name:
+      payload.file_name || payload.crop_data_file_name,
+    file_content:
+      payload.file_content || payload.crop_data_file,
+  };
+
+  if (
+    !body.region_id ||
+    Number.isNaN(body.region_id)
+  ) {
+    throw new Error("Invalid region ID.");
+  }
+
+  if (!body.file_name) {
+    throw new Error("Excel file name is missing.");
+  }
+
+  if (!body.file_content) {
+    throw new Error("Excel file content is missing.");
+  }
+
+  try {
+    const response = await api.post(
+      "/s1/region/crops/upload",
+      body
+    );
+
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// MONITORING
+// ============================================================
+
+export const disableMonitoring = async (farmId: number) => {
+  try {
+    const response = await api.patch(
+      `/region/${farmId}/disable-monitoring`
+    );
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// ADMIN DASHBOARD
+// ============================================================
+
+export const getAdminDashboard = async () => {
+  try {
+    const response = await api.get("/admin/dashboard");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// OTHER DASHBOARD ENDPOINTS
+// ============================================================
+
+export const getSoilSummary = async () => {
+  try {
+    const response = await api.get("/soil-summary");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const getCropSummary = async () => {
+  try {
+    const response = await api.get("/crop-summary");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const getMap = async (params: any) => {
+  try {
+    const response = await api.get("/map", { params });
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const getRecommendations = async () => {
+  try {
+    const response = await api.get("/recommendations");
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const createRecommendation = async (data: any) => {
+  try {
+    const response = await api.post("/recommendations", data);
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+export const saveRegionMappings = async (
+  regionId: string | number,
+  payload: Record<string, unknown>
+) => {
+  if (
+    regionId === "" ||
+    regionId === null ||
+    regionId === undefined ||
+    Number.isNaN(Number(regionId))
+  ) {
+    throw new Error("Invalid region ID.");
+  }
+
+  try {
+    const response = await api.post("/region/crops/map", {
+      ...payload,
+      region_id: Number(regionId),
+    });
+
+    return unwrap(response.data);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+// ============================================================
+// DEFAULT EXPORT
+// ============================================================
 
 export default api;

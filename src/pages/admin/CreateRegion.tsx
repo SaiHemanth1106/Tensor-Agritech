@@ -1,132 +1,103 @@
-﻿import { useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
+﻿
+import { useEffect, useState } from "react";
 
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControl,
   InputLabel,
-  LinearProgress,
   MenuItem,
   Paper,
   Select,
-  Snackbar,
   TextField,
   Typography,
 } from "@mui/material";
 
-import { createRegion, getOrganizations } from "../../services/api";
+import { Country, State } from "country-state-city";
 
-// ============================================================
-// TYPES
-// ============================================================
+import {
+  createRegion,
+  getOrganizations,
+} from "../../services/regionApi";
 
 interface Organization {
   id: number;
   name: string;
+  is_active?: boolean;
 }
 
-interface CreateRegionResponse {
-  success?: boolean;
-  message?: string;
-
-  region?: {
-    region_id?: number | string;
-    name?: string;
-  };
-
-  kml?: {
-    bucket?: string;
-    s3_key?: string;
-    s3_uri?: string;
-    file_name?: string;
-    file_size?: number;
-  };
-
-  fields?: {
-    count?: number;
-  };
+interface RegionForm {
+  organizationId: string;
+  country: string;
+  state: string;
+  name: string;
+  description: string;
 }
 
-// ============================================================
-// INITIAL FORM
-// ============================================================
-
-const initialForm = {
+const initialForm: RegionForm = {
   organizationId: "",
+  country: "",
+  state: "",
   name: "",
   description: "",
-  area: "",
 };
 
-// ============================================================
-// COMPONENT
-// ============================================================
+const extractOrganizations = (response: any): Organization[] => {
+  const data =
+    response?.organizations ??
+    response?.data?.organizations ??
+    response?.data ??
+    response;
+
+  if (!Array.isArray(data)) {
+    return [];
+  }
+
+  return data.filter(
+    (organization: Organization) => organization.is_active !== false
+  );
+};
 
 export default function CreateRegion() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [form, setForm] = useState<RegionForm>(initialForm);
 
-  const [form, setForm] = useState(initialForm);
+  const [selectedCountry, setSelectedCountry] =
+    useState<ReturnType<typeof Country.getAllCountries>[number] | null>(
+      null
+    );
 
-  // Base64 KML
-  const [kmlFile, setKmlFile] = useState<string | null>(null);
+  const [selectedState, setSelectedState] =
+    useState<ReturnType<typeof State.getStatesOfCountry>[number] | null>(
+      null
+    );
 
-  // Original file name
-  const [fileName, setFileName] = useState("");
-
-  const [loadingOrganizations, setLoadingOrganizations] =
-    useState(true);
-
+  const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-
-  const [uploadStatus, setUploadStatus] = useState("");
-
-  const [message, setMessage] = useState("");
-
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [completionOpen, setCompletionOpen] = useState(false);
+  const countries = Country.getAllCountries();
 
-  const [progress, setProgress] = useState(0);
-
-  const [processStatus, setProcessStatus] = useState<
-    "pending" | "running" | "success" | "error"
-  >("pending");
-
-  const [processDetail, setProcessDetail] = useState(
-    "Not started"
-  );
-
-  const [notification, setNotification] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
-    open: false,
-    message: "",
-    severity: "success",
-  });
-
-  // ============================================================
-  // LOAD ORGANIZATIONS
-  // ============================================================
+  const states = selectedCountry
+    ? State.getStatesOfCountry(selectedCountry.isoCode)
+    : [];
 
   useEffect(() => {
     const loadOrganizations = async () => {
       try {
-        const result = await getOrganizations();
+        setLoadingOrganizations(true);
+        setError("");
 
-        setOrganizations(result);
-      } catch (loadError) {
+        const response = await getOrganizations();
+        setOrganizations(extractOrganizations(response));
+      } catch (err) {
         setError(
-          loadError instanceof Error
-            ? loadError.message
+          err instanceof Error
+            ? err.message
             : "Failed to load organizations."
         );
       } finally {
@@ -137,322 +108,107 @@ export default function CreateRegion() {
     void loadOrganizations();
   }, []);
 
-  // ============================================================
-  // UPDATE FORM
-  // ============================================================
-
-  const updateField = (
-    field: keyof typeof form,
-    value: string
-  ) => {
+  const updateField = (field: keyof RegionForm, value: string) => {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
   };
 
-  // ============================================================
-  // NOTIFICATION
-  // ============================================================
-
-  const showNotification = (
-    severity: "success" | "error",
-    notificationMessage: string
-  ) => {
-    setNotification({
-      open: true,
-      severity,
-      message: notificationMessage,
-    });
-  };
-
-  // ============================================================
-  // KML FILE
-  // ============================================================
-
-  const handleFile = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const selectedFile = event.target.files?.[0];
-
-    if (!selectedFile) {
-      return;
-    }
-
-    setError("");
-    setMessage("");
-    setUploadStatus("");
-    setKmlFile(null);
-    setFileName("");
-
-    // ----------------------------------------------------------
-    // Validate extension
-    // ----------------------------------------------------------
-
-    if (
-      !selectedFile.name
-        .toLowerCase()
-        .endsWith(".kml")
-    ) {
-      setError("Please select a valid KML file.");
-      return;
-    }
-
-    // ----------------------------------------------------------
-    // Read file as Base64
-    // ----------------------------------------------------------
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      try {
-        const result = reader.result as string;
-
-        const base64Content = result.includes(",")
-          ? result.split(",")[1]
-          : result;
-
-        if (!base64Content) {
-          throw new Error(
-            "Unable to read KML file."
-          );
-        }
-
-        setKmlFile(base64Content);
-
-        setFileName(selectedFile.name);
-
-        setUploadStatus(
-          "KML file is ready to upload."
-        );
-      } catch {
-        setKmlFile(null);
-        setFileName("");
-
-        setError(
-          "Unable to read the selected KML file."
-        );
-      }
-    };
-
-    reader.onerror = () => {
-      setKmlFile(null);
-      setFileName("");
-
-      setError(
-        "Unable to read the selected KML file."
-      );
-    };
-
-    reader.readAsDataURL(selectedFile);
-  };
-
-  // ============================================================
-  // CREATE REGION
-  // ============================================================
-
   const handleSubmit = async () => {
-    setMessage("");
     setError("");
-    setCompletionOpen(false);
+    setSuccess("");
 
-    // ----------------------------------------------------------
-    // VALIDATE FORM
-    // ----------------------------------------------------------
-
-    if (
-      Object.values(form).some(
-        (value) => !String(value).trim()
-      )
-    ) {
-      const validationError =
-        "All region details are required.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
+    if (!form.organizationId) {
+      setError("Please select Organisation ID.");
       return;
     }
 
-    // ----------------------------------------------------------
-    // VALIDATE KML
-    // ----------------------------------------------------------
-
-    if (!kmlFile) {
-      const validationError =
-        "Please select a KML file.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
+    if (!form.country.trim()) {
+      setError("Please select Country.");
       return;
     }
 
-    // ----------------------------------------------------------
-    // VALIDATE AREA
-    // ----------------------------------------------------------
-
-    const regionArea = Number(form.area);
-
-    if (
-      !Number.isFinite(regionArea) ||
-      regionArea <= 0
-    ) {
-      const validationError =
-        "Region area must be a number greater than zero.";
-
-      setError(validationError);
-
-      showNotification(
-        "error",
-        validationError
-      );
-
+    if (!form.state.trim()) {
+      setError("Please select State.");
       return;
     }
 
-    // ==========================================================
-    // START PROCESS
-    // ==========================================================
+    if (!form.name.trim()) {
+      setError("Please enter Region Name.");
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setError("Please enter Description.");
+      return;
+    }
 
     try {
       setSubmitting(true);
 
-      setProgress(25);
+      const result = await createRegion({
+        organization_id: Number(form.organizationId),
+        country: form.country.trim(),
+        state: form.state.trim(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+      });
 
-      setProcessStatus("running");
-
-      setProcessDetail(
-        "Sending region and KML to AWS..."
-      );
-
-      setUploadStatus(
-        "Creating region and processing KML..."
-      );
-
-      // ========================================================
-      // SINGLE API CALL
-      // ========================================================
-
-      const result =
-        (await createRegion({
-          organization_id:
-            Number(form.organizationId),
-
-          name: form.name.trim(),
-
-          description:
-            form.description.trim(),
-
-          region_area: regionArea,
-
-          kml_file_name: fileName,
-
-          kml_file_content: kmlFile,
-        })) as CreateRegionResponse;
-
-      // ========================================================
-      // SUCCESS
-      // ========================================================
-
-      setProgress(100);
-
-      setProcessStatus("success");
+      if (result?.success === false) {
+        throw new Error(
+          result?.error || result?.message || "Region creation failed."
+        );
+      }
 
       const regionId =
-        result?.region?.region_id;
+        result?.region_id ??
+        result?.region?.region_id ??
+        result?.region?.id ??
+        result?.id;
 
-      const fieldCount =
-        result?.fields?.count ?? 0;
+      if (
+        regionId === undefined ||
+        regionId === null ||
+        String(regionId).trim() === ""
+      ) {
+        throw new Error(
+          "The response did not contain a region ID. Check the API response."
+        );
+      }
 
-      const successDetail = regionId
-        ? `Region ID ${regionId} created successfully. ${fieldCount} field geometry record(s) imported.`
-        : `Region created successfully. ${fieldCount} field geometry record(s) imported.`;
+      const regionData = {
+        regionId: String(regionId),
+        organizationId: String(
+          result?.organization_id ?? form.organizationId
+        ),
+        country: result?.country ?? form.country.trim(),
+        state: result?.state ?? form.state.trim(),
+        regionName: result?.name ?? form.name.trim(),
+        description: result?.description ?? form.description.trim(),
+      };
 
-      setProcessDetail(successDetail);
+      localStorage.setItem("lastCreatedRegion", JSON.stringify(regionData));
+      localStorage.setItem("lastCreatedRegionId", String(regionId));
 
-      setMessage(
-        "Region and KML processed successfully."
+      setSuccess(
+        `Region created successfully. Region ID: ${regionId}`
       );
-
-      setUploadStatus(
-        "Region creation and KML processing completed."
-      );
-
-      showNotification(
-        "success",
-        successDetail
-      );
-
-      setCompletionOpen(true);
-
-      // --------------------------------------------------------
-      // Reset form
-      // --------------------------------------------------------
 
       setForm(initialForm);
-
-      setKmlFile(null);
-
-      setFileName("");
-    } catch (submitError: unknown) {
-      // ========================================================
-      // ERROR
-      // ========================================================
-
-      setProgress(75);
-
-      setProcessStatus("error");
-
-      const detail =
-        submitError instanceof Error
-          ? submitError.message
-          : typeof submitError === "object" &&
-              submitError &&
-              "message" in submitError
-            ? String(
-                (
-                  submitError as {
-                    message?: unknown;
-                  }
-                ).message
-              )
-            : "Failed to create region.";
-
-      setProcessDetail(detail);
-
-      setError(detail);
-
-      setUploadStatus("");
-
-      showNotification(
-        "error",
-        detail
+      setSelectedCountry(null);
+      setSelectedState(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to create region."
       );
-
-      setCompletionOpen(true);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ============================================================
-  // UI
-  // ============================================================
-
   return (
-    <Box
-      maxWidth={650}
-      mx="auto"
-    >
+    <Box maxWidth={650} mx="auto">
       <Paper
         elevation={3}
         sx={{
@@ -460,327 +216,201 @@ export default function CreateRegion() {
           borderRadius: 3,
         }}
       >
-        <Typography
-          variant="h5"
-          fontWeight="bold"
-          mb={3}
-        >
+        <Typography variant="h5" fontWeight="bold" mb={1}>
           📍 Create Region
         </Typography>
 
-        {/* ERROR */}
+        <Typography variant="body2" color="text.secondary" mb={3}>
+          Create a region first. You can upload its KML file later from
+          Create Field.
+        </Typography>
 
         {error && (
-          <Alert
-            severity="error"
-            sx={{ mb: 2 }}
-          >
+          <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
 
-        {/* SUCCESS */}
-
-        {message && (
-          <Alert
-            severity="success"
-            sx={{ mb: 2 }}
-          >
-            {message}
+        {success && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            {success}
           </Alert>
         )}
-
-        {/* ORGANIZATION */}
 
         <FormControl
           fullWidth
           required
           sx={{ mb: 2 }}
-          disabled={
-            loadingOrganizations ||
-            submitting
-          }
+          disabled={loadingOrganizations || submitting}
         >
-          <InputLabel>
+          <InputLabel id="organization-label">
             Organisation ID
           </InputLabel>
 
           <Select
+            labelId="organization-label"
             value={form.organizationId}
             label="Organisation ID"
             onChange={(event) =>
-              updateField(
-                "organizationId",
-                event.target.value
-              )
+              updateField("organizationId", String(event.target.value))
             }
           >
-            {organizations.map(
-              (organization) => (
-                <MenuItem
-                  key={organization.id}
-                  value={organization.id}
-                >
-                  {organization.id} —{" "}
-                  {organization.name}
-                </MenuItem>
-              )
-            )}
+            {organizations.map((organization) => (
+              <MenuItem key={organization.id} value={organization.id}>
+                {organization.id} — {organization.name}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
 
-        {/* REGION NAME */}
-
-        <TextField
-          label="Region Name"
-          fullWidth
-          required
-          disabled={submitting}
-          sx={{ mb: 2 }}
-          value={form.name}
-          onChange={(event) =>
-            updateField(
-              "name",
-              event.target.value
-            )
-          }
-        />
-
-        {/* DESCRIPTION */}
-
-        <TextField
-          label="Description"
-          fullWidth
-          required
-          multiline
-          rows={3}
-          disabled={submitting}
-          sx={{ mb: 2 }}
-          value={form.description}
-          onChange={(event) =>
-            updateField(
-              "description",
-              event.target.value
-            )
-          }
-        />
-
-        {/* AREA */}
-
-        <TextField
-          label="Region Area"
-          fullWidth
-          required
-          type="number"
-          disabled={submitting}
-          inputProps={{
-            min: 0,
-            step: "any",
-          }}
-          helperText="Enter the area in the unit required by the backend."
-          sx={{ mb: 3 }}
-          value={form.area}
-          onChange={(event) =>
-            updateField(
-              "area",
-              event.target.value
-            )
-          }
-        />
-
-        {/* KML */}
-
-        <Box sx={{ mb: 2 }}>
-          <Typography
-            variant="subtitle1"
-            fontWeight="medium"
-            mb={1}
-          >
-            Region KML *
-          </Typography>
-
-          <Button
-            component="label"
-            variant="outlined"
-            fullWidth
-            disabled={submitting}
-          >
-            Upload KML
-
-            <input
-              hidden
-              required
-              type="file"
-              accept=".kml,application/vnd.google-earth.kml+xml"
-              onChange={handleFile}
-            />
-          </Button>
-
-          {fileName && (
-            <Typography
-              variant="body2"
-              sx={{ mt: 1 }}
-            >
-              Selected file: {fileName}
-            </Typography>
-          )}
-        </Box>
-
-        {/* PROCESS STATUS */}
-
-        {processStatus !== "pending" && (
-          <Box sx={{ mb: 2 }}>
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              mb={0.75}
-            >
-              <Typography
-                variant="body2"
-                fontWeight="medium"
-              >
-                Region processing
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-              >
-                {progress}%
-              </Typography>
-            </Box>
-
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              color={
-                processStatus === "error"
-                  ? "error"
-                  : "primary"
-              }
-              sx={{
-                height: 8,
-                borderRadius: 1,
-                mb: 1,
-              }}
-            />
-
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-            >
-              {processDetail}
+        {loadingOrganizations && (
+          <Box display="flex" alignItems="center" gap={1} mb={2}>
+            <CircularProgress size={18} />
+            <Typography variant="body2">
+              Loading organizations...
             </Typography>
           </Box>
         )}
 
-        {/* STATUS */}
-
-        {uploadStatus && (
-          <Alert
-            severity="info"
-            sx={{ mb: 2 }}
-          >
-            {uploadStatus}
+        {!loadingOrganizations && organizations.length === 0 && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            No active organizations were returned by the API.
           </Alert>
         )}
 
-        {/* CREATE BUTTON */}
+        <Autocomplete
+          fullWidth
+          options={countries}
+          value={selectedCountry}
+          disabled={submitting}
+          autoHighlight
+          filterSelectedOptions
+          getOptionLabel={(option) => option.name}
+          isOptionEqualToValue={(option, value) =>
+            option.isoCode === value.isoCode
+          }
+          onChange={(_, country) => {
+            setSelectedCountry(country);
+            setSelectedState(null);
+
+            setForm((current) => ({
+              ...current,
+              country: country?.name ?? "",
+              state: "",
+            }));
+
+            setError("");
+            setSuccess("");
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Country"
+              placeholder="Search country..."
+              required
+            />
+          )}
+          sx={{ mb: 2 }}
+        />
+
+        <Autocomplete
+          fullWidth
+          options={states}
+          value={selectedState}
+          disabled={!selectedCountry || submitting}
+          autoHighlight
+          filterSelectedOptions
+          getOptionLabel={(option) => option.name}
+          isOptionEqualToValue={(option, value) =>
+            option.isoCode === value.isoCode
+          }
+          onChange={(_, state) => {
+            setSelectedState(state);
+
+            setForm((current) => ({
+              ...current,
+              state: state?.name ?? "",
+            }));
+
+            setError("");
+            setSuccess("");
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="State"
+              placeholder={
+                selectedCountry
+                  ? "Search state..."
+                  : "Select country first"
+              }
+              required
+            />
+          )}
+          sx={{ mb: 2 }}
+        />
+
+        <TextField
+          fullWidth
+          required
+          label="Region Name"
+          value={form.name}
+          disabled={submitting}
+          onChange={(event) => {
+            updateField("name", event.target.value);
+            setError("");
+            setSuccess("");
+          }}
+          sx={{ mb: 2 }}
+        />
+
+        <TextField
+          fullWidth
+          required
+          multiline
+          rows={3}
+          label="Description"
+          value={form.description}
+          disabled={submitting}
+          onChange={(event) => {
+            updateField("description", event.target.value);
+            setError("");
+            setSuccess("");
+          }}
+          sx={{ mb: 3 }}
+        />
 
         <Button
-          variant="contained"
           fullWidth
-          onClick={handleSubmit}
+          variant="contained"
           disabled={
             submitting ||
-            loadingOrganizations
+            loadingOrganizations ||
+            organizations.length === 0
           }
+          onClick={handleSubmit}
+          sx={{
+            minHeight: 45,
+            backgroundColor: "#075d16",
+            "&:hover": {
+              backgroundColor: "#064d12",
+            },
+          }}
         >
           {submitting ? (
-            <CircularProgress
-              size={24}
-              color="inherit"
-            />
+            <>
+              <CircularProgress
+                size={21}
+                color="inherit"
+                sx={{ mr: 1 }}
+              />
+              CREATING...
+            </>
           ) : (
-            "Create Region"
+            "CREATE REGION"
           )}
         </Button>
       </Paper>
-
-      {/* COMPLETION DIALOG */}
-
-      <Dialog
-        open={completionOpen}
-        onClose={() =>
-          setCompletionOpen(false)
-        }
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>
-          {processStatus === "success"
-            ? "Region Process Completed"
-            : "Region Process Failed"}
-        </DialogTitle>
-
-        <DialogContent>
-          <Alert
-            severity={
-              processStatus === "success"
-                ? "success"
-                : "error"
-            }
-          >
-            <Typography fontWeight="bold">
-              uploadRegion Lambda:{" "}
-              {processStatus}
-            </Typography>
-
-            {processDetail}
-          </Alert>
-        </DialogContent>
-
-        <DialogActions>
-          <Button
-            onClick={() =>
-              setCompletionOpen(false)
-            }
-          >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* SNACKBAR */}
-
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={() =>
-          setNotification(
-            (current) => ({
-              ...current,
-              open: false,
-            })
-          )
-        }
-      >
-        <Alert
-          severity={notification.severity}
-          variant="filled"
-          onClose={() =>
-            setNotification(
-              (current) => ({
-                ...current,
-                open: false,
-              })
-            )
-          }
-        >
-          {notification.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }
