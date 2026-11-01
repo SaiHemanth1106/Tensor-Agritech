@@ -8,13 +8,11 @@ import api, {
 // ============================================================
 
 export interface FieldRegionQuery {
-  /**
-   * Optional for an authorized global administrator.
-   * The backend must enforce the user's permissions.
-   */
   organization_id?: number;
   country?: string;
   state?: string;
+  region_id?: number | string;
+  include_geometries?: boolean;
 }
 
 export interface Region {
@@ -200,6 +198,13 @@ export const getFieldRegions = async (
     if (params.state?.trim()) {
       queryParams.state = params.state.trim();
     }
+    if (params.region_id != null) {
+  queryParams.region_id = params.region_id;
+}
+
+if (params.include_geometries) {
+  queryParams.include_geometries = "true";
+}
 
     const response = await api.get("/region-field", {
       params: queryParams,
