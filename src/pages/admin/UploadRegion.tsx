@@ -20,11 +20,13 @@ import Autocomplete from "@mui/material/Autocomplete";
 import { MapContainer, TileLayer, Polygon } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
+import { getOrganizations } from "../../services/api";
+
 import {
-  getOrganizations,
   updateRegionFromImport,
-  getRegionsByOrg
-} from "../../services/api";
+  getRegionsByOrg,
+  getRegionList,
+} from "../../services/regionApi";
 
 export default function UploadRegion() {
 
@@ -34,7 +36,7 @@ export default function UploadRegion() {
 
   const [file, setFile] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
-  const [geometry, setGeometry] = useState<any[]>([]);
+  const [geometry, setGeometry] = useState<[number, number][][]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -71,11 +73,17 @@ export default function UploadRegion() {
   useEffect(() => {
     if (!form.organization_id) return;
 
-    getRegionsByOrg(form.organization_id)
-      .then((res) => setRegions(res || []))
-      .catch(() =>
-        setAlert({ type: "error", text: "Failed to load regions" })
-      );
+    getRegionsByOrg(Number(form.organization_id))
+  .then((res: unknown) => {
+    setRegions(getRegionList(res));
+  })
+  .catch((error) => {
+    console.error("Failed to load regions:", error);
+    setAlert({
+      type: "error",
+      text: "Failed to load regions",
+    });
+  });
   }, [form.organization_id]);
 
   // ================= AUTO CROP DURATION =================
@@ -98,19 +106,52 @@ export default function UploadRegion() {
   }, [form.sowing_date, form.expected_harvest_date]);
 
   // ================= KML PARSE =================
-  const extractGeometry = (kmlText: string) => {
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(kmlText, "text/xml");
+ const extractGeometry = (kmlText: string): [number, number][][] => {
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(kmlText, "text/xml");
 
-    const coords = xml.getElementsByTagName("coordinates")[0];
-    if (!coords) return [];
+  // Check for invalid KML/XML
+  if (xml.getElementsByTagName("parsererror").length > 0) {
+    throw new Error("Invalid KML file format.");
+  }
 
-    return coords.textContent!.trim().split(" ").map(p => {
-      const [lon, lat] = p.split(",");
-      return [parseFloat(lat), parseFloat(lon)];
-    });
-  };
+  // Get every coordinates element
+  const coordinateElements =
+    xml.getElementsByTagName("coordinates");
 
+  const polygons: [number, number][][] = [];
+
+  for (let i = 0; i < coordinateElements.length; i++) {
+    const coordinateText =
+      coordinateElements[i].textContent?.trim();
+
+    if (!coordinateText) continue;
+
+    const points = coordinateText
+      .split(/\s+/)
+      .map((point) => {
+        const [longitude, latitude] = point.split(",");
+
+        const lat = Number(latitude);
+        const lon = Number(longitude);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          return null;
+        }
+
+        return [lat, lon] as [number, number];
+      })
+      .filter(
+        (point): point is [number, number] => point !== null
+      );
+
+    if (points.length >= 3) {
+      polygons.push(points);
+    }
+  }
+
+  return polygons;
+};
   // ================= FILE =================
   const handleFile = (e: any) => {
     const f = e.target.files[0];
@@ -404,10 +445,20 @@ export default function UploadRegion() {
       <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>Map Preview</DialogTitle>
         <DialogContent>
-          <MapContainer style={{ height: 400 }} center={geometry[0] || [20, 78]} zoom={15}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            <Polygon positions={geometry} />
-          </MapContainer>
+          <MapContainer
+  style={{ height: 400, width: "100%" }}
+  center={geometry[0]?.[0] || [20, 78]}
+  zoom={15}
+>
+  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+  {geometry.map((polygon, index) => (
+    <Polygon
+      key={index}
+      positions={polygon}
+    />
+  ))}
+</MapContainer>
         </DialogContent>
       </Dialog>
 

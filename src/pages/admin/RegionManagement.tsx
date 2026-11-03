@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { GeoJsonObject, FeatureCollection, Feature } from "geojson";
+import type { GeoJsonObject, FeatureCollection, Feature, Geometry } from "geojson";
 
 import {
 
@@ -85,21 +85,33 @@ type RegionFieldRow = {
 };
 
 const getRegionList = (response: unknown): Region[] => {
+  if (Array.isArray(response)) {
+    return response as Region[];
+  }
 
-  if (Array.isArray(response)) return response as Region[];
+  if (!response || typeof response !== "object") {
+    return [];
+  }
 
-  if (response && typeof response === "object") {
+  const record = response as Record<string, unknown>;
 
-const record = response as Record<string, unknown>;
+  if (Array.isArray(record.regions)) {
+    return record.regions as Region[];
+  }
 
-    if (Array.isArray(record.regions)) return record.regions as Region[];
+  if (Array.isArray(record.data)) {
+    return record.data as Region[];
+  }
 
-    if (Array.isArray(record.data)) return record.data as Region[];
+  if (record.data && typeof record.data === "object") {
+    const nested = record.data as Record<string, unknown>;
 
+    if (Array.isArray(nested.regions)) {
+      return nested.regions as Region[];
+    }
   }
 
   return [];
-
 };
 
 const valueFor = (region: Region, ...keys: string[]) => {
@@ -138,51 +150,118 @@ const value = region.is_monitoring ?? region.monitoring_enabled;
 
 };
 
-const regionGeometry = (region: Region): GeoJsonObject | null => {
-  // /region-field returns region geometry in geometries[].geometry.
-  const geometries = region.geometries;
+const regionGeometry = (
+  region: Region
+): FeatureCollection | null => {
+  const toFeatureCollection = (
+    value: unknown,
+    properties: Record<string, unknown> = {}
+  ): FeatureCollection | null => {
+    let parsed = value;
 
-  if (Array.isArray(geometries)) {
-    for (const item of geometries) {
-      if (!item || typeof item !== "object") continue;
-
-      const candidate = (item as Record<string, unknown>).geometry;
-
-      if (typeof candidate === "string") {
-        try {
-          const parsed = JSON.parse(candidate) as GeoJsonObject;
-          if (parsed && typeof parsed === "object" && "type" in parsed) {
-            return parsed;
-          }
-        } catch {
-          // Ignore malformed geometry and try the next item.
-        }
-      } else if (
-        candidate &&
-        typeof candidate === "object" &&
-        "type" in candidate
-      ) {
-        return candidate as GeoJsonObject;
+    if (typeof parsed === "string") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return null;
       }
     }
-  }
 
-  // Backward compatibility for endpoints returning direct GeoJSON.
-  const geometry = region.geometry ?? region.geojson ?? region.geo_json;
-
-  if (typeof geometry === "string") {
-    try {
-      return JSON.parse(geometry) as GeoJsonObject;
-    } catch {
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("type" in parsed)
+    ) {
       return null;
+    }
+
+    const geo = parsed as Record<string, unknown>;
+
+    if (geo.type === "FeatureCollection") {
+      return parsed as FeatureCollection;
+    }
+
+    if (geo.type === "Feature") {
+      return {
+        type: "FeatureCollection",
+        features: [parsed as Feature],
+      };
+    }
+
+    const geometryTypes = [
+      "Point",
+      "MultiPoint",
+      "LineString",
+      "MultiLineString",
+      "Polygon",
+      "MultiPolygon",
+      "GeometryCollection",
+    ];
+
+    if (geometryTypes.includes(String(geo.type))) {
+      return {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties,
+            geometry: parsed as Geometry,
+          },
+        ],
+      };
+    }
+
+    return null;
+  };
+
+  // Combine every geometry returned for this region.
+  if (Array.isArray(region.geometries)) {
+    const features: Feature[] = [];
+
+    for (const item of region.geometries) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      const record = item as Record<string, unknown>;
+
+      const candidate =
+        record.geometry ??
+        record.geojson ??
+        record.geo_json ??
+        record;
+
+      const properties =
+        record.properties &&
+        typeof record.properties === "object"
+          ? (record.properties as Record<string, unknown>)
+          : record;
+
+      const collection = toFeatureCollection(
+        candidate,
+        properties
+      );
+
+      if (collection) {
+        features.push(...collection.features);
+      }
+    }
+
+    if (features.length > 0) {
+      return {
+        type: "FeatureCollection",
+        features,
+      };
     }
   }
 
-  if (geometry && typeof geometry === "object" && "type" in geometry) {
-    return geometry as GeoJsonObject;
-  }
+  // Support APIs that return geometry directly on the region.
+  const directGeometry =
+    region.geometry ??
+    region.geojson ??
+    region.geo_json;
 
-  return null;
+  return toFeatureCollection(directGeometry);
 };
 
 const normalizeMapped = (value: unknown): MappedValue => {
@@ -209,11 +288,7 @@ const regionName = valueFor(region, "name", "region_name");
 
 const geometry = regionGeometry(region);
 
-const featureCollection: Feature[] = geometry && geometry.type === "FeatureCollection"
-
-    ? (geometry as FeatureCollection).features
-
-    : [];
+const featureCollection: Feature[] = geometry?.features ?? [];
 
   if (!featureCollection.length) {
 
@@ -344,57 +419,38 @@ const states = useMemo(
   );
 
 const loadRegions = useCallback(async () => {
-
   try {
-
     setLoading(true);
-
     setError("");
 
-    // Global admin: organization_id is intentionally omitted.
+    // Fetch region list without geometry.
+    const response = await getFieldRegions({});
 
-const response = await getFieldRegions({} as Parameters<typeof getFieldRegions>[0]);
+    console.log("Region list response:", response);
 
-const nextRegions = getRegionList(response);
+    const nextRegions = getRegionList(response);
 
     setRegions(nextRegions);
 
     setSelectedRegionId((current) =>
-
       nextRegions.some(
-
         (region) => getRegionId(region) === current
-
       )
-
         ? current
-
         : ""
-
     );
-
   } catch (loadError: unknown) {
-
-const message =
-
+    const message =
       loadError instanceof Error
-
         ? loadError.message
-
         : "Failed to load saved regions.";
 
     setError(message);
-
     setRegions([]);
-
     setSelectedRegionId("");
-
   } finally {
-
     setLoading(false);
-
   }
-
 }, []);
 
   useEffect(() => { void loadRegions(); }, [loadRegions]);

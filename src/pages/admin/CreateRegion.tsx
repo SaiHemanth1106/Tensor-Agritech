@@ -147,13 +147,29 @@ export default function CreateRegion() {
     try {
       setSubmitting(true);
 
-      const result = await createRegion({
-        organization_id: Number(form.organizationId),
-        country: form.country.trim(),
-        state: form.state.trim(),
-        name: form.name.trim(),
-        description: form.description.trim(),
-      });
+     const result = (await createRegion({
+  organization_id: Number(form.organizationId),
+  country: form.country.trim(),
+  state: form.state.trim(),
+  name: form.name.trim(),
+  description: form.description.trim(),
+})) as CreateRegionResponse;
+      interface CreateRegionResponse {
+  success?: boolean;
+  error?: string;
+  message?: string;
+  region_id?: number | string;
+  id?: number | string;
+  organization_id?: number | string;
+  country?: string;
+  state?: string;
+  name?: string;
+  description?: string;
+  region?: {
+    region_id?: number | string;
+    id?: number | string;
+  };
+}
 
       if (result?.success === false) {
         throw new Error(
